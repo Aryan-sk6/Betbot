@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/4753a237-5cec-4c2e-961e-1d3709f5589a
+
 # groupbet
 
 A play-money prediction market for friend groups. Ask a question in the chat ("Will Rahul be late?"), everyone bets fake points, prices move as people bet, and the creator settles it. **No real money, ever.**

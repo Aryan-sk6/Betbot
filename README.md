@@ -2,7 +2,7 @@
 
 A play-money prediction market for friend groups. Ask a question in the chat ("Will Rahul be late?"), everyone bets fake points, prices move as people bet, and the creator settles it. **No real money, ever.**
 
-The game engine knows nothing about chat apps. Adapters translate platform messages into `handleCommand(...)` and send back the string it returns. Included: a terminal simulator and a WhatsApp adapter.
+The game engine knows nothing about chat apps. Adapters translate platform messages into `handleCommand(...)` and send back the string it returns. Included: a terminal simulator and adapters for **Telegram**, **Discord** and **WhatsApp**.
 
 > **Disclaimer.** WhatsApp mode uses [Baileys](https://github.com/WhiskeySockets/Baileys), an *unofficial* library. It may violate WhatsApp's Terms of Service and the number you connect **may get banned**. Use a spare number. Self-host only. Points are play points with no monetary value.
 
@@ -38,7 +38,7 @@ Bookkeeping: balances are never stored; they are `SUM(delta)` over an append-onl
 
 ## Run it
 
-Requires Node 20+.
+Requires Node 20+ (Node 22+ for Discord).
 
 ```bash
 npm install
@@ -65,6 +65,22 @@ npm run whatsapp
 
 On first run, link the bot as a linked device. Either scan the QR printed in the terminal or set `GROUPBET_PAIR_PHONE=<country code + number>` to get a pairing code to enter under *Linked devices > Link with phone number*. Session files live in `./auth` and the database in `./data/groupbet.db`. If WhatsApp logs the bot out, delete `./auth` and pair again. Only group messages are handled.
 
+**Telegram** (official Bot API, recommended: no ban risk):
+
+1. Message [@BotFather](https://t.me/BotFather), run `/newbot`, copy the token.
+2. `TELEGRAM_BOT_TOKEN=123:abc npm start -- --adapter telegram`
+3. Add the bot to a group. Commands work as `/bet yes 50` or `/bet@yourbot yes 50`. Make it a group admin only if you want admin-gated `/resolve` to see the member list (not required).
+
+**Discord** (official gateway; needs Node 22+):
+
+1. In the [Developer Portal](https://discord.com/developers/applications) create an application, add a Bot, copy its token, and turn on **Message Content Intent**.
+2. Invite it with the `bot` scope and "Send Messages" + "Read Message History" permissions.
+3. `DISCORD_BOT_TOKEN=... npm start -- --adapter discord`
+
+One Discord server = one group economy. Server owners and members with Administrator or Manage Server count as admins.
+
+Run several at once with `--adapter telegram,discord,whatsapp`; they share one database but every chat keeps its own economy.
+
 **Docker:**
 
 ```bash
@@ -77,7 +93,9 @@ docker compose up -d --build
 
 | Env var | Default | |
 |---|---|---|
-| `GROUPBET_ADAPTER` | `cli` | `cli` or `whatsapp` (or `--adapter`) |
+| `GROUPBET_ADAPTER` | `cli` | `cli`, `whatsapp`, `telegram`, `discord`, or a comma list (or `--adapter`) |
+| `TELEGRAM_BOT_TOKEN` | unset | From @BotFather |
+| `DISCORD_BOT_TOKEN` | unset | From the Developer Portal |
 | `GROUPBET_DB` | `./data/groupbet.db` (`:memory:` for CLI) | SQLite file |
 | `GROUPBET_B` | `100` | Default liquidity for new markets |
 | `TZ` | `Asia/Kolkata` | Timezone for `/new ... closes <time>` |
@@ -89,7 +107,7 @@ docker compose up -d --build
 ```
 src/core/      commands, LMSR math, ledger, engine (no adapter imports)
 src/db/        schema.sql + migrations
-src/adapters/  cli.ts, whatsapp.ts
+src/adapters/  cli.ts, whatsapp.ts, telegram.ts, discord.ts
 tests/         vitest
 ```
 

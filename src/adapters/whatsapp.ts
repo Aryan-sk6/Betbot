@@ -4,16 +4,14 @@ import makeWASocket, {
   DisconnectReason,
   normalizeMessageContent,
   useMultiFileAuthState,
-  type GroupMetadata,
   type WAMessage,
   type WASocket,
 } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
-import { createEngine, type EngineOptions } from "../core/engine.js";
+import { createEngine } from "../core/engine.js";
+import { SendQueue, createAdminChecker, type AdapterBase } from "./shared.js";
 
 const AUTH_DIR = process.env.GROUPBET_AUTH_DIR ?? "./auth";
-const SEND_DELAY_MS = 700;
-const ADMIN_CACHE_MS = 60_000;
 
 /** Plain text of a message, from `conversation` or `extendedTextMessage.text`. */
 export function extractText(m: WAMessage): string {
@@ -24,53 +22,6 @@ export function extractText(m: WAMessage): string {
 export function extractMentions(m: WAMessage): string[] {
   const content = normalizeMessageContent(m.message);
   return content?.extendedTextMessage?.contextInfo?.mentionedJid ?? [];
-}
-
-/** Sends one message at a time with a pause between sends, to avoid bursts. */
-export class SendQueue {
-  private tail: Promise<void> = Promise.resolve();
-  constructor(
-    private readonly send: (jid: string, text: string) => Promise<unknown>,
-    private readonly delayMs = SEND_DELAY_MS,
-    private readonly sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
-  ) {}
-
-  enqueue(jid: string, text: string): Promise<void> {
-    const run = this.tail.then(async () => {
-      try {
-        await this.send(jid, text);
-      } catch (err) {
-        console.error("[whatsapp] send failed:", err);
-      }
-      await this.sleep(this.delayMs);
-    });
-    this.tail = run;
-    return run;
-  }
-}
-
-/** Admin lookup against group metadata, cached for a minute per group. */
-export function createAdminChecker(
-  getMetadata: (groupJid: string) => Promise<Pick<GroupMetadata, "participants">>,
-  ttlMs = ADMIN_CACHE_MS,
-  now: () => number = Date.now,
-) {
-  const cache = new Map<string, { at: number; admins: Set<string> }>();
-  return async (groupJid: string, userId: string): Promise<boolean> => {
-    let entry = cache.get(groupJid);
-    if (!entry || now() - entry.at > ttlMs) {
-      const meta = await getMetadata(groupJid);
-      const admins = new Set<string>();
-      for (const p of meta.participants) {
-        if (!(p.admin || p.isAdmin || p.isSuperAdmin)) continue;
-        // A participant can be known by LID or phone-number JID; accept any of them.
-        for (const id of [p.id, p.lid, p.phoneNumber]) if (id) admins.add(id);
-      }
-      entry = { at: now(), admins };
-      cache.set(groupJid, entry);
-    }
-    return entry.admins.has(userId);
-  };
 }
 
 // Baileys needs a logger; keep it quiet except for warnings and errors.
@@ -91,7 +42,7 @@ function printQr(qr: string): void {
   qrcode.generate(qr, { small: true });
 }
 
-export async function runWhatsApp(base: Omit<EngineOptions, "isAdmin" | "now">): Promise<void> {
+export async function runWhatsApp(base: AdapterBase): Promise<void> {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
   let sock: WASocket | undefined;
   const queue = new SendQueue((jid, text) => sock!.sendMessage(jid, { text }));

@@ -23,18 +23,17 @@ if (dbPath !== ":memory:") {
 const db = openDb(dbPath);
 const base = { db, tz, defaultB };
 
-switch (adapter) {
-  case "cli": {
-    const { runCli } = await import("./adapters/cli.js");
-    await runCli(base);
-    break;
-  }
-  case "whatsapp": {
-    const { runWhatsApp } = await import("./adapters/whatsapp.js");
-    await runWhatsApp(base);
-    break;
-  }
-  default:
-    console.error(`Unknown adapter "${adapter}". Use --adapter cli or --adapter whatsapp.`);
-    process.exit(1);
+// Several adapters can share one process and database: --adapter telegram,discord
+const runners: Record<string, () => Promise<void>> = {
+  cli: async () => (await import("./adapters/cli.js")).runCli(base),
+  whatsapp: async () => (await import("./adapters/whatsapp.js")).runWhatsApp(base),
+  telegram: async () => (await import("./adapters/telegram.js")).runTelegram(base),
+  discord: async () => (await import("./adapters/discord.js")).runDiscord(base),
+};
+const names = adapter.split(",").map((n) => n.trim());
+const unknown = names.find((n) => !runners[n]);
+if (unknown) {
+  console.error(`Unknown adapter "${unknown}". Use one or more of: ${Object.keys(runners).join(", ")}.`);
+  process.exit(1);
 }
+await Promise.all(names.map((n) => runners[n]()));

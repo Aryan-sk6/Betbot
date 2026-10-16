@@ -5,6 +5,9 @@ services:
     environment:
       GROUPBET_ADAPTER: whatsapp
       TZ: Asia/Kolkata
+      # GROUPBET_ADAPTER: whatsapp,telegram,discord   # any combination
+      # TELEGRAM_BOT_TOKEN: ""
+      # DISCORD_BOT_TOKEN: ""
       # GROUPBET_PAIR_PHONE: "919876543210"   # optional: pairing code instead of QR
     volumes:
       - ./auth:/app/auth

@@ -44,8 +44,9 @@ export class LlmError extends Error {
   constructor(
     readonly provider: string,
     readonly status: number,
+    detail = "",
   ) {
-    super(`${provider} request failed with HTTP ${status}`);
+    super(`${provider} request failed with HTTP ${status}${detail ? `: ${detail}` : ""}`);
   }
 }
 
@@ -62,6 +63,19 @@ export async function postJson(
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(cfg.timeoutMs ?? 15_000),
   });
-  if (!res.ok) throw new LlmError(provider, res.status);
+  if (!res.ok) throw new LlmError(provider, res.status, await errorDetail(res, cfg.apiKey));
   return res.json();
+}
+
+/** The provider's own error text (e.g. "model not found"), with anything key-like removed. */
+async function errorDetail(res: Response, apiKey?: string): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    const e = body?.error as { message?: unknown } | string | undefined;
+    let msg = typeof e === "string" ? e : typeof e?.message === "string" ? e.message : "";
+    if (apiKey) msg = msg.split(apiKey).join("[redacted]");
+    return msg.replace(/[A-Za-z0-9_.\-]{28,}/g, "[redacted]").replace(/\s+/g, " ").slice(0, 200);
+  } catch {
+    return "";
+  }
 }

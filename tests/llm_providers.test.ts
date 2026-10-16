@@ -83,7 +83,16 @@ describe("errors", () => {
     const p = createOpenAiProvider({ apiKey: "sk-secret", model: "m", fetch: f as unknown as typeof fetch });
     const err = await p.call(req).catch((e) => e);
     expect(err).toBeInstanceOf(LlmError);
-    expect(err.message).toBe("openai request failed with HTTP 401");
+    expect(err.message).toBe("openai request failed with HTTP 401: nope");
     expect(String(err.stack)).not.toContain("sk-secret");
+  });
+
+  it("includes the provider's reason but redacts the key if it is echoed back", async () => {
+    const f = reply({ error: { message: "models/foo is not found. bad key sk-secret-1234 AIzaSyA1234567890abcdefghijklmnopqrstu" } }, 404);
+    const p = createOpenAiProvider({ apiKey: "sk-secret-1234", model: "foo", fetch: f as unknown as typeof fetch });
+    const err = await p.call(req).catch((e) => e);
+    expect(err.message).toContain("models/foo is not found");
+    expect(err.message).not.toContain("sk-secret-1234");
+    expect(err.message).not.toContain("AIzaSy");
   });
 });

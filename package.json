@@ -1,0 +1,28 @@
+{
+  "name": "groupbet",
+  "version": "0.1.0",
+  "description": "Play-money prediction market bot for friend groups. LMSR pricing, transport-agnostic engine, WhatsApp via Baileys.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "cli": "tsx src/index.ts --adapter cli",
+    "whatsapp": "tsx src/index.ts --adapter whatsapp",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "better-sqlite3": "^13.0.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

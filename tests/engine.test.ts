@@ -7,7 +7,6 @@ const G = "group1@g.us";
 let db: Db;
 let engine: Engine;
 let clock: number;
-const admins = new Set<string>();
 
 const say = (user: string, text: string, group = G) =>
   engine.handleCommand({ groupId: group, userId: `${user}@lid`, displayName: user, text });
@@ -23,8 +22,7 @@ function invariant(group = G) {
 beforeEach(() => {
   db = openDb(":memory:");
   clock = Date.UTC(2026, 9, 14, 4, 30);
-  admins.clear();
-  engine = createEngine({ db, now: () => clock, tz: "Asia/Kolkata", isAdmin: (_g, u) => admins.has(u) });
+  engine = createEngine({ db, now: () => clock, tz: "Asia/Kolkata" });
 });
 
 describe("engine basics", () => {
@@ -138,10 +136,13 @@ describe("resolve and void", () => {
     await say("meera", "/bet no 100");
   });
 
-  it("only creator or admin may resolve", async () => {
-    expect(await say("khush", "/resolve 1 yes")).toContain("Only the market creator");
-    admins.add("khush@lid");
-    expect(await say("khush", "/resolve 1 yes")).toContain("resolved YES");
+  it("only the creator may resolve or void, nobody else", async () => {
+    expect(await say("khush", "/resolve 1 yes")).toBe("Only the market creator (rahul) can do that.");
+    expect(await say("meera", "/void 1")).toContain("Only the market creator");
+    expect(await say("khush", "/resolve 1 yes")).not.toContain("resolved"); // still refused
+    expect((db.prepare(`SELECT status FROM markets WHERE num = 1`).get() as { status: string }).status).toBe("open");
+    expect(bal("khush")).toBe(900);
+    expect(await say("rahul", "/resolve 1 yes")).toContain("resolved YES");
   });
 
   it("cannot resolve twice; resolved markets stop trading", async () => {

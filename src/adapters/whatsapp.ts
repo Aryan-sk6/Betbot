@@ -9,7 +9,7 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import { createEngine } from "../core/engine.js";
-import { SendQueue, createAdminChecker, type AdapterBase } from "./shared.js";
+import { SendQueue, type AdapterBase } from "./shared.js";
 
 const AUTH_DIR = process.env.GROUPBET_AUTH_DIR ?? "./auth";
 
@@ -46,8 +46,7 @@ export async function runWhatsApp(base: AdapterBase): Promise<void> {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
   let sock: WASocket | undefined;
   const queue = new SendQueue((jid, text) => sock!.sendMessage(jid, { text }));
-  const isAdmin = createAdminChecker((jid) => sock!.groupMetadata(jid));
-  const engine = createEngine({ ...base, isAdmin });
+  const engine = createEngine(base);
 
   function connect(): void {
     const s = makeWASocket({ auth: state, logger, markOnlineOnConnect: false });

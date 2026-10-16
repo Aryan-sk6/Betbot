@@ -10,7 +10,7 @@ import { parseCommand, type Command } from "../core/commands.js";
 import { createEngine, type Actor, type Engine, type IncomingMessage } from "../core/engine.js";
 import { createNlu, formatCommand, needsConfirmation, type Nlu } from "../core/nlu.js";
 import { DEFAULT_TZ } from "../core/time.js";
-import { SendQueue, createAdminChecker, type AdapterBase } from "./shared.js";
+import { SendQueue, type AdapterBase } from "./shared.js";
 
 export interface TgUser {
   id: number;
@@ -231,11 +231,7 @@ export async function runTelegram(base: AdapterBase, fetchFn: typeof fetch = fet
     clearKeyboard: (chat_id, message_id) =>
       call<unknown>("editMessageReplyMarkup", { chat_id, message_id, reply_markup: { inline_keyboard: [] } }).then(() => {}, () => {}),
   };
-  const isAdmin = createAdminChecker(async (groupId) => {
-    const admins = await call<{ user: TgUser }[]>("getChatAdministrators", { chat_id: Number(groupId.slice(3)) });
-    return { participants: admins.map((a) => ({ id: `tg:${a.user.id}`, admin: "admin" })) };
-  });
-  const engine = createEngine({ ...base, isAdmin });
+  const engine = createEngine(base);
   const nlu = createNlu();
   const handler = createTelegramHandler({ engine, io, me, nlu, tz: base.tz });
 

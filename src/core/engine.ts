@@ -19,12 +19,8 @@ export interface IncomingMessage {
   mentions?: string[]; // opaque platform ids mentioned in the message
 }
 
-/** Supplied by the adapter. May be async (e.g. WhatsApp group metadata lookup). */
-export type AdminCheck = (groupId: string, userId: string) => boolean | Promise<boolean>;
-
 export interface EngineOptions {
   db: Db;
-  isAdmin?: AdminCheck;
   now?: () => number;
   tz?: string;
   defaultB?: number;
@@ -87,8 +83,8 @@ const HELP = [
   "/odds [#id]  odds and volume",
   "/markets  open markets",
   "/market <#id>  details and top holders",
-  "/resolve <#id> yes|no  creator/admin only",
-  "/void <#id>  refund everyone, creator/admin only",
+  "/resolve <#id> yes|no  creator only",
+  "/void <#id>  refund everyone, creator only",
   "/balance  your points",
   "/leaderboard  group ranking",
 ].join("\n");
@@ -99,7 +95,6 @@ export function createEngine(opts: EngineOptions): Engine {
   const tz = opts.tz && isValidTz(opts.tz) ? opts.tz : DEFAULT_TZ;
   const defaultB = opts.defaultB ?? 100;
   const startingBalance = opts.startingBalance ?? 1000;
-  const isAdmin: AdminCheck = opts.isAdmin ?? (() => false);
 
   // ---- helpers ----------------------------------------------------------
 
@@ -281,13 +276,14 @@ export function createEngine(opts: EngineOptions): Engine {
     ].join("\n");
   }
 
-  function requireManage(m: MarketRow, user: UserRow, admin: boolean): void {
-    if (m.creator_id !== user.id && !admin) throw new UserError("Only the market creator or a group admin can do that.");
+  /** Only the person who created a market with /new may settle or cancel it. */
+  function requireCreator(m: MarketRow, user: UserRow): void {
+    if (m.creator_id !== user.id) throw new UserError(`Only the market creator (${nameOf(m.creator_id)}) can do that.`);
   }
 
-  function cmdResolve(g: string, user: UserRow, admin: boolean, c: Extract<Command, { type: "resolve" }>): string {
+  function cmdResolve(g: string, user: UserRow, c: Extract<Command, { type: "resolve" }>): string {
     const m = getMarket(g, c.marketNum);
-    requireManage(m, user, admin);
+    requireCreator(m, user);
     if (m.status === "resolved" || m.status === "void") throw new UserError(`Market #${m.num} is already ${m.status}.`);
     const col = c.outcome === "yes" ? "yes_shares" : "no_shares";
     const winners = db
@@ -307,9 +303,9 @@ export function createEngine(opts: EngineOptions): Engine {
     return `Market #${m.num} resolved ${upper(c.outcome)}: ${m.question}${tail}`;
   }
 
-  function cmdVoid(g: string, user: UserRow, admin: boolean, c: Extract<Command, { type: "void" }>): string {
+  function cmdVoid(g: string, user: UserRow, c: Extract<Command, { type: "void" }>): string {
     const m = getMarket(g, c.marketNum);
-    requireManage(m, user, admin);
+    requireCreator(m, user);
     if (m.status === "resolved" || m.status === "void") throw new UserError(`Market #${m.num} is already ${m.status}.`);
     const users = db
       .prepare(`SELECT DISTINCT user_id AS userId FROM ledger WHERE market_id = ? AND user_id IS NOT NULL AND reason IN ('bet','sell')`)
@@ -369,14 +365,6 @@ export function createEngine(opts: EngineOptions): Engine {
       }
       if (cmd.type === "help") return HELP;
 
-      // Admin lookup may be async, so do it before the (synchronous) transaction.
-      let admin = false;
-      if (cmd.type === "resolve" || cmd.type === "void") {
-        closeExpired(g);
-        const m = getMarket(g, cmd.marketNum);
-        if (m.creator_id !== user.id) admin = await isAdmin(g, msg.userId);
-      }
-
       return db.transaction((): string => {
         closeExpired(g);
         switch (cmd.type) {
@@ -386,8 +374,8 @@ export function createEngine(opts: EngineOptions): Engine {
           case "odds": return cmdOdds(g, cmd);
           case "markets": return cmdMarkets(g);
           case "market": return cmdMarket(g, cmd);
-          case "resolve": return cmdResolve(g, user, admin, cmd);
-          case "void": return cmdVoid(g, user, admin, cmd);
+          case "resolve": return cmdResolve(g, user, cmd);
+          case "void": return cmdVoid(g, user, cmd);
           case "balance": return cmdBalance(g, user, msg.mentions);
           case "leaderboard": return cmdLeaderboard(g);
         }

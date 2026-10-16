@@ -1,7 +1,7 @@
 import type { EngineOptions } from "../core/engine.js";
 
-/** What index.ts hands to every adapter; each adapter adds its own isAdmin. */
-export type AdapterBase = Omit<EngineOptions, "isAdmin" | "now">;
+/** What index.ts hands to every adapter. */
+export type AdapterBase = Omit<EngineOptions, "now">;
 
 const sleepMs = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -26,37 +26,4 @@ export class SendQueue<T = string> {
     this.tail = run;
     return run;
   }
-}
-
-export interface AdminParticipant {
-  id: string;
-  lid?: string;
-  phoneNumber?: string;
-  admin?: string | null;
-  isAdmin?: boolean;
-  isSuperAdmin?: boolean;
-}
-
-/** Admin lookup against a group's participant list, cached per group. */
-export function createAdminChecker(
-  getMetadata: (groupId: string) => Promise<{ participants: AdminParticipant[] }>,
-  ttlMs = 60_000,
-  now: () => number = Date.now,
-) {
-  const cache = new Map<string, { at: number; admins: Set<string> }>();
-  return async (groupId: string, userId: string): Promise<boolean> => {
-    let entry = cache.get(groupId);
-    if (!entry || now() - entry.at > ttlMs) {
-      const meta = await getMetadata(groupId);
-      const admins = new Set<string>();
-      for (const p of meta.participants) {
-        if (!(p.admin || p.isAdmin || p.isSuperAdmin)) continue;
-        // A participant can be known by several ids (e.g. WhatsApp LID and phone JID).
-        for (const id of [p.id, p.lid, p.phoneNumber]) if (id) admins.add(id);
-      }
-      entry = { at: now(), admins };
-      cache.set(groupId, entry);
-    }
-    return entry.admins.has(userId);
-  };
 }

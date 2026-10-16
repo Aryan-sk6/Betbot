@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { toIncoming as tg } from "../src/adapters/telegram.js";
-import { toIncoming as dc, isDiscordAdmin } from "../src/adapters/discord.js";
+import { toIncoming as dc } from "../src/adapters/discord.js";
 
 describe("telegram", () => {
   const base = { from: { id: 7, first_name: "Khush", last_name: "S" }, chat: { id: -100, type: "supergroup" } };
@@ -27,11 +27,5 @@ describe("discord", () => {
     expect(dc({ ...msg, member: { nick: "K" } })!.displayName).toBe("K");
     expect(dc({ ...msg, guild_id: undefined })).toBeNull();
     expect(dc({ ...msg, author: { ...msg.author, bot: true } })).toBeNull();
-  });
-  it("detects admins by owner or permission bits", () => {
-    const guild = { owner_id: "o", roles: [{ id: "r1", permissions: "8" }, { id: "r2", permissions: "2048" }] };
-    expect(isDiscordAdmin(guild, { roles: [] }, "o")).toBe(true);
-    expect(isDiscordAdmin(guild, { roles: ["r1"] }, "u")).toBe(true);
-    expect(isDiscordAdmin(guild, { roles: ["r2"] }, "u")).toBe(false);
   });
 });

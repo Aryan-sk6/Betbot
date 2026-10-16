@@ -24,8 +24,8 @@ The game engine knows nothing about chat apps. Adapters translate platform messa
 | `/odds [#id]` | Odds and volume. |
 | `/markets` | Open markets (and closed ones awaiting resolution). |
 | `/market <#id>` | Details, odds, top holders. |
-| `/resolve <#id> yes\|no` | Settle a market. Creator or group admin only. |
-| `/void <#id>` | Cancel and refund everyone's net spend. Creator or group admin only. |
+| `/resolve <#id> yes\|no` | Settle a market. **Only the person who created it with `/new`.** |
+| `/void <#id>` | Cancel and refund everyone's net spend. Only the market's creator. |
 | `/balance` | Your points (or an @mentioned player's). |
 | `/leaderboard` | This group's ranking. |
 | `/help` | Command list. |
@@ -63,7 +63,7 @@ npm run cli
 > as rahul: /resolve 1 yes
 ```
 
-Meta commands: `:admin <name>` toggles admin, `:advance 2h` moves the fake clock (to test auto-close), `:who`, `:quit`. The CLI uses an in-memory DB unless `GROUPBET_DB` is set.
+Meta commands: `:advance 2h` moves the fake clock (to test auto-close), `:who`, `:quit`. The CLI uses an in-memory DB unless `GROUPBET_DB` is set.
 
 **WhatsApp mode:**
 
@@ -77,7 +77,7 @@ On first run, link the bot as a linked device. Either scan the QR printed in the
 
 1. Message [@BotFather](https://t.me/BotFather), run `/newbot`, copy the token.
 2. `TELEGRAM_BOT_TOKEN=123:abc npm start -- --adapter telegram`
-3. Add the bot to a group. Commands work as `/bet yes 50` or `/bet@yourbot yes 50`. Make it a group admin only if you want admin-gated `/resolve` to see the member list (not required).
+3. Add the bot to a group. Commands work as `/bet yes 50` or `/bet@yourbot yes 50`.
 
 **Discord** (official gateway; needs Node 22+):
 
@@ -85,7 +85,7 @@ On first run, link the bot as a linked device. Either scan the QR printed in the
 2. Invite it with the `bot` scope and "Send Messages" + "Read Message History" permissions.
 3. `DISCORD_BOT_TOKEN=... npm start -- --adapter discord`
 
-One Discord server = one group economy. Server owners and members with Administrator or Manage Server count as admins.
+One Discord server = one group economy.
 
 Run several at once with `--adapter telegram,discord,whatsapp`; they share one database but every chat keeps its own economy.
 
@@ -95,7 +95,7 @@ Run several at once with `--adapter telegram,discord,whatsapp`; they share one d
 2. Everyone bets: `/bet yes 50` (add the market number when several are open: `/bet #2 yes 50`)
 3. Check on it: `/odds`, `/market 1`, `/balance`, `/leaderboard`
 4. Cash out early with `/sell yes all`
-5. When it's decided, the creator or a group admin settles it: `/resolve 1 yes` (or `/void 1` to refund everyone)
+5. When it's decided, the person who created the market settles it (nobody else can, not even group admins): `/resolve 1 yes` (or `/void 1` to refund everyone)
 
 The bot only runs while your process is running; see Docker below for leaving it on a server.
 

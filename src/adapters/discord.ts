@@ -8,8 +8,6 @@ const API = "https://discord.com/api/v10";
 const GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json";
 // GUILDS | GUILD_MESSAGES | MESSAGE_CONTENT
 const INTENTS = (1 << 0) | (1 << 9) | (1 << 15);
-const ADMINISTRATOR = 0x8n;
-const MANAGE_GUILD = 0x20n;
 
 export interface DcMessage {
   channel_id: string;
@@ -29,18 +27,6 @@ export function toIncoming(m: DcMessage): IncomingMessage | null {
     text: m.content,
     mentions: (m.mentions ?? []).map((u) => `dc:${u.id}`),
   };
-}
-
-/** Guild owner, or a member with a role granting Administrator or Manage Server. */
-export function isDiscordAdmin(
-  guild: { owner_id: string; roles: { id: string; permissions: string }[] },
-  member: { user?: { id: string }; roles: string[] },
-  userId: string,
-): boolean {
-  if (guild.owner_id === userId) return true;
-  return guild.roles.some(
-    (r) => member.roles.includes(r.id) && (BigInt(r.permissions) & (ADMINISTRATOR | MANAGE_GUILD)) !== 0n,
-  );
 }
 
 export async function runDiscord(base: AdapterBase): Promise<void> {
@@ -68,22 +54,7 @@ export async function runDiscord(base: AdapterBase): Promise<void> {
     300,
   );
 
-  const adminCache = new Map<string, { at: number; ok: boolean }>();
-  const isAdmin = async (groupId: string, userId: string): Promise<boolean> => {
-    const key = `${groupId}/${userId}`;
-    const hit = adminCache.get(key);
-    if (hit && Date.now() - hit.at < 60_000) return hit.ok;
-    const guildId = groupId.slice(3);
-    const uid = userId.slice(3);
-    const [guild, member] = await Promise.all([
-      rest<{ owner_id: string; roles: { id: string; permissions: string }[] }>("GET", `/guilds/${guildId}`),
-      rest<{ roles: string[] }>("GET", `/guilds/${guildId}/members/${uid}`),
-    ]);
-    const ok = isDiscordAdmin(guild, member, uid);
-    adminCache.set(key, { at: Date.now(), ok });
-    return ok;
-  };
-  const engine = createEngine({ ...base, isAdmin });
+  const engine = createEngine(base);
 
   let seq: number | null = null;
   let sessionId: string | undefined;

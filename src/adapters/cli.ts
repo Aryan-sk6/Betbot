@@ -62,7 +62,7 @@ export function createCliSession(base: Omit<EngineOptions, "isAdmin" | "now">) {
 
 export async function runCli(base: Omit<EngineOptions, "isAdmin" | "now">): Promise<void> {
   const session = createCliSession(base);
-  console.log("groupbet CLI. Type :help for meta commands, /help for bot commands.\n");
+  console.log("Betbot CLI. Type :help for meta commands, /help for bot commands.\n");
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "> " });
   rl.prompt();
   for await (const line of rl) {

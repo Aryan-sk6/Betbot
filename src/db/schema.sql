@@ -1,4 +1,4 @@
--- groupbet schema (migration 1). Applied by db.ts via PRAGMA user_version.
+-- Betbot schema (migration 1). Applied by db.ts via PRAGMA user_version.
 
 CREATE TABLE users (
   id           INTEGER PRIMARY KEY,

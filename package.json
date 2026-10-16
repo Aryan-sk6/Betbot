@@ -1,5 +1,5 @@
 {
-  "name": "groupbet",
+  "name": "betbot",
   "version": "0.1.0",
   "description": "Play-money prediction market bot for friend groups. LMSR pricing, transport-agnostic engine, WhatsApp via Baileys.",
   "license": "MIT",

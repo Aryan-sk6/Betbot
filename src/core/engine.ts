@@ -63,7 +63,7 @@ const fmtShares = (n: number) => String(Math.round(n * 10) / 10);
 const upper = (s: Side) => s.toUpperCase();
 
 const HELP = [
-  "groupbet: play-money predictions (no real money, ever)",
+  "Betbot: play-money predictions (no real money, ever)",
   "/new <question> | closes <time>  create a market",
   "/bet [#id] yes|no <points>  buy shares",
   "/sell [#id] yes|no <shares|all>  sell shares back",

@@ -1,5 +1,5 @@
 services:
-  groupbet:
+  betbot:
     build: .
     restart: unless-stopped
     environment:

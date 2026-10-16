@@ -1,8 +1,6 @@
-
+# Betbot
 
 https://github.com/user-attachments/assets/4753a237-5cec-4c2e-961e-1d3709f5589a
-
-# groupbet
 
 A play-money prediction market for friend groups. Ask a question in the chat ("Will Rahul be late?"), everyone bets fake points, prices move as people bet, and the creator settles it. **No real money, ever.**
 
@@ -73,7 +71,7 @@ Meta commands: `:admin <name>` toggles admin, `:advance 2h` moves the fake clock
 npm run whatsapp
 ```
 
-On first run, link the bot as a linked device. Either scan the QR printed in the terminal or set `GROUPBET_PAIR_PHONE=<country code + number>` to get a pairing code to enter under *Linked devices > Link with phone number*. Session files live in `./auth` and the database in `./data/groupbet.db`. If WhatsApp logs the bot out, delete `./auth` and pair again. Only group messages are handled.
+On first run, link the bot as a linked device. Either scan the QR printed in the terminal or set `GROUPBET_PAIR_PHONE=<country code + number>` to get a pairing code to enter under *Linked devices > Link with phone number*. Session files live in `./auth` and the database in `./data/Betbot.db`. If WhatsApp logs the bot out, delete `./auth` and pair again. Only group messages are handled.
 
 **Telegram** (official Bot API, recommended: no ban risk):
 
@@ -106,7 +104,7 @@ docker compose up -d --build
 | `GROUPBET_ADAPTER` | `cli` | `cli`, `whatsapp`, `telegram`, `discord`, or a comma list (or `--adapter`) |
 | `TELEGRAM_BOT_TOKEN` | unset | From @BotFather |
 | `DISCORD_BOT_TOKEN` | unset | From the Developer Portal |
-| `GROUPBET_DB` | `./data/groupbet.db` (`:memory:` for CLI) | SQLite file |
+| `GROUPBET_DB` | `./data/Betbot.db` (`:memory:` for CLI) | SQLite file |
 | `GROUPBET_B` | `100` | Default liquidity for new markets |
 | `TZ` | `Asia/Kolkata` | Timezone for `/new ... closes <time>` |
 | `GROUPBET_AUTH_DIR` | `./auth` | Baileys session folder |

@@ -94,7 +94,7 @@ export async function runDiscord(base: AdapterBase): Promise<void> {
     const ws = new WebSocket(resumeUrl ? `${resumeUrl}/?v=10&encoding=json` : GATEWAY);
     const send = (op: number, d: unknown) => ws.send(JSON.stringify({ op, d }));
     const identify = () =>
-      send(2, { token, intents: INTENTS, properties: { os: process.platform, browser: "groupbet", device: "groupbet" } });
+      send(2, { token, intents: INTENTS, properties: { os: process.platform, browser: "betbot", device: "betbot" } });
 
     ws.onmessage = async (ev) => {
       const p = JSON.parse(String(ev.data)) as { op: number; t?: string; s?: number; d: any };

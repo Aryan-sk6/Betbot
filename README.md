@@ -122,6 +122,7 @@ How it works:
 | `LLM_API_KEY` | unset | Required, except for `ollama` or an `openai` provider with a custom `LLM_BASE_URL` |
 | `LLM_MODEL` | provider default | Set it explicitly. Must support tool/function calling |
 | `LLM_BASE_URL` | provider default | For Ollama, LM Studio, vLLM, OpenRouter, ... |
+| `LLM_TIMEOUT_MS` | `15000` | Raise for slow local models |
 | `NLU_RATE_USER_PER_MIN` | `6` | LLM calls per user per minute |
 | `NLU_RATE_GROUP_PER_MIN` | `30` | LLM calls per group per minute |
 | `NLU_MIN_CONFIDENCE` | `0.6` | Below this the bot asks instead of acting |
@@ -143,7 +144,7 @@ ollama pull llama3.1          # any model with tool calling support
 LLM_PROVIDER=ollama LLM_MODEL=llama3.1 TELEGRAM_BOT_TOKEN=... npm start -- --adapter telegram
 ```
 
-`ollama` defaults the base URL to `http://localhost:11434/v1` and needs no key. If the bot runs in Docker and Ollama on the host, set `LLM_BASE_URL=http://host.docker.internal:11434/v1`. Small local models are less reliable at picking the right market; the confidence and clarification rules are what keep that safe.
+`ollama` defaults the base URL to `http://localhost:11434/v1` and needs no key. If the bot runs in Docker and Ollama on the host, set `LLM_BASE_URL=http://host.docker.internal:11434/v1`. Local models need RAM: `llama3.1` (5 GB) is too heavy for an 8 GB machine, so try `llama3.2` (2 GB) and raise `LLM_TIMEOUT_MS` for the first, model-loading call. Small local models are less reliable at picking the right market; the confidence and clarification rules are what keep that safe.
 
 The NLU code lives in `src/core/nlu.ts` and `src/core/llm/` and is platform-agnostic, so Discord and WhatsApp can use it later by calling `parse()` the same way the Telegram adapter does.
 

@@ -14,7 +14,7 @@ const DEFAULT_MODELS = {
 /**
  * Build a provider from env, or null when NLU is not configured.
  *   LLM_PROVIDER = openai | anthropic | gemini   ("ollama" is an alias for openai + local base URL)
- *   LLM_API_KEY, LLM_MODEL, LLM_BASE_URL
+ *   LLM_API_KEY, LLM_MODEL, LLM_BASE_URL, LLM_TIMEOUT_MS (default 15000)
  * A key is required, except for OpenAI-compatible servers on a custom base URL (Ollama needs none).
  */
 export function providerFromEnv(env: Record<string, string | undefined> = process.env): LlmProvider | null {
@@ -31,6 +31,12 @@ export function providerFromEnv(env: Record<string, string | undefined> = proces
   }
   const apiKey = env.LLM_API_KEY?.trim() || undefined;
   if (!apiKey && !(kind === "openai" && baseUrl)) return null;
-  const cfg = { apiKey, baseUrl, model: env.LLM_MODEL?.trim() || DEFAULT_MODELS[kind] };
+  const timeout = Number(env.LLM_TIMEOUT_MS);
+  const cfg = {
+    apiKey,
+    baseUrl,
+    model: env.LLM_MODEL?.trim() || DEFAULT_MODELS[kind],
+    ...(Number.isFinite(timeout) && timeout > 0 ? { timeoutMs: timeout } : {}),
+  };
   return kind === "openai" ? createOpenAiProvider(cfg) : kind === "anthropic" ? createAnthropicProvider(cfg) : createGeminiProvider(cfg);
 }

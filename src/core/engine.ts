@@ -31,8 +31,25 @@ export interface EngineOptions {
   startingBalance?: number;
 }
 
+export type Actor = Omit<IncomingMessage, "text">;
+
+export interface ChatContext {
+  /** Markets that can still be acted on: open, or closed and awaiting resolution. */
+  markets: { num: number; question: string; status: "open" | "closed" }[];
+  /** The caller's balance (the starting balance if they have not played yet). */
+  balance: number;
+}
+
 export interface Engine {
+  /** Parse and run a "/" command. Returns null for anything that isn't one. */
   handleCommand(msg: IncomingMessage): Promise<string | null>;
+  /**
+   * Run an already-parsed command as `actor`. Permissions, balances and payouts are decided
+   * here, whatever produced the command (e.g. the optional natural-language layer).
+   */
+  execute(actor: Actor, cmd: Command): Promise<string>;
+  /** Read-only snapshot used to build prompts and confirmation rules. */
+  getContext(groupId: string, userId: string): ChatContext;
 }
 
 class UserError extends Error {}
@@ -329,6 +346,21 @@ export function createEngine(opts: EngineOptions): Engine {
   async function handleCommand(msg: IncomingMessage): Promise<string | null> {
     const cmd = parseCommand(msg.text);
     if (!cmd) return null;
+    return execute(msg, cmd);
+  }
+
+  function getContext(groupId: string, userId: string): ChatContext {
+    closeExpired(groupId);
+    const markets = db
+      .prepare(`SELECT num, question, status FROM markets WHERE group_id = ? AND status IN ('open','closed') ORDER BY num`)
+      .all(groupId) as ChatContext["markets"];
+    const user = db.prepare(`SELECT id FROM users WHERE group_id = ? AND platform_id = ?`).get(groupId, userId) as
+      | { id: number }
+      | undefined;
+    return { markets, balance: user ? ledger.balance(db, groupId, user.id) : startingBalance };
+  }
+
+  async function execute(msg: Actor, cmd: Command): Promise<string> {
     const g = msg.groupId;
     try {
       const user = ensureUser(g, msg.userId, msg.displayName);
@@ -366,5 +398,5 @@ export function createEngine(opts: EngineOptions): Engine {
     }
   }
 
-  return { handleCommand };
+  return { handleCommand, execute, getContext };
 }

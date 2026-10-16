@@ -8,6 +8,9 @@ services:
       # GROUPBET_ADAPTER: whatsapp,telegram,discord   # any combination
       # TELEGRAM_BOT_TOKEN: ""
       # DISCORD_BOT_TOKEN: ""
+      # LLM_PROVIDER: anthropic   # optional natural language mode, see README
+      # LLM_API_KEY: ""
+      # LLM_MODEL: claude-haiku-5-5
       # GROUPBET_PAIR_PHONE: "919876543210"   # optional: pairing code instead of QR
     volumes:
       - ./auth:/app/auth

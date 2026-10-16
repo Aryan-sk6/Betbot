@@ -97,6 +97,56 @@ docker compose up -d --build
 
 `./auth` and `./data` are mounted as volumes.
 
+## Natural language mode (optional)
+
+On Telegram you can write plain English instead of strict commands, if you configure an LLM. Without a key this is completely off and the bot behaves exactly as before.
+
+> @betbot put 50 on yes for the rahul thing
+> @betbot what are the odds on the rain one?
+> (replying to a bot message) sell all my no
+
+How it works:
+
+- It only triggers when the bot is **@mentioned** or when the message is a **reply to one of the bot's messages**. Everything else in the chat is never sent anywhere.
+- Messages starting with `/` never call the LLM.
+- The model only picks a command and its arguments (via tool calling, validated with a zod schema that mirrors the command types). Anything invalid is dropped. Balances, payouts and permission checks are decided by the engine exactly as for a typed command, so a model that gets tricked still can't resolve a market it doesn't own or mint points.
+- It resolves references like "the rahul thing" only against the group's open markets. If more than one fits, or confidence is low, it asks a question listing the candidates instead of acting.
+- A bet over 25% of your balance, and any `/resolve` or `/void`, gets a **Confirm / Cancel** button first. Only the person who asked can press it, and it expires after 2 minutes.
+- Per-user and per-group rate limits apply.
+
+**BotFather privacy mode can stay on** (the default). Telegram still delivers `/commands`, @mentions of the bot, and replies to the bot, which is everything this mode needs. You do not have to disable privacy mode.
+
+| Env var | Default | |
+|---|---|---|
+| `LLM_PROVIDER` | unset (NLU off) | `openai` (any OpenAI-compatible API), `anthropic`, `gemini`, or `ollama` |
+| `LLM_API_KEY` | unset | Required, except for `ollama` or an `openai` provider with a custom `LLM_BASE_URL` |
+| `LLM_MODEL` | provider default | Set it explicitly. Must support tool/function calling |
+| `LLM_BASE_URL` | provider default | For Ollama, LM Studio, vLLM, OpenRouter, ... |
+| `NLU_RATE_USER_PER_MIN` | `6` | LLM calls per user per minute |
+| `NLU_RATE_GROUP_PER_MIN` | `30` | LLM calls per group per minute |
+| `NLU_MIN_CONFIDENCE` | `0.6` | Below this the bot asks instead of acting |
+| `LOG_LEVEL` | unset | `debug` also logs message text. Never use it with real chats you care about |
+
+```bash
+LLM_PROVIDER=anthropic LLM_API_KEY=... LLM_MODEL=claude-haiku-5-5 \
+TELEGRAM_BOT_TOKEN=... npm start -- --adapter telegram
+```
+
+**Cost.** Each addressed message is one small request (a short system prompt, your open market questions, the message) and a few tokens back. With a small, cheap model that is typically a fraction of a cent per message; check your provider's current pricing, and lower the rate limits if the group is chatty. Local models cost nothing.
+
+**Privacy.** When someone addresses the bot in plain English, the provider receives: that message text, the speaker's display name, the questions of the group's open markets, and the current time. It never receives balances, user IDs or chat history. Nothing is cached, the API key is sent only in a request header (never in a URL) and never logged, and message text is not logged unless `LOG_LEVEL=debug`. If that is more than you want to share, use Ollama so nothing leaves your machine.
+
+**Ollama (fully local).**
+
+```bash
+ollama pull llama3.1          # any model with tool calling support
+LLM_PROVIDER=ollama LLM_MODEL=llama3.1 TELEGRAM_BOT_TOKEN=... npm start -- --adapter telegram
+```
+
+`ollama` defaults the base URL to `http://localhost:11434/v1` and needs no key. If the bot runs in Docker and Ollama on the host, set `LLM_BASE_URL=http://host.docker.internal:11434/v1`. Small local models are less reliable at picking the right market; the confidence and clarification rules are what keep that safe.
+
+The NLU code lives in `src/core/nlu.ts` and `src/core/llm/` and is platform-agnostic, so Discord and WhatsApp can use it later by calling `parse()` the same way the Telegram adapter does.
+
 ### Configuration
 
 | Env var | Default | |
@@ -113,7 +163,7 @@ docker compose up -d --build
 ## Layout
 
 ```
-src/core/      commands, LMSR math, ledger, engine (no adapter imports)
+src/core/      commands, LMSR math, ledger, engine, optional nlu + llm/ providers (no adapter imports)
 src/db/        schema.sql + migrations
 src/adapters/  cli.ts, whatsapp.ts, telegram.ts, discord.ts
 tests/         vitest

@@ -4,6 +4,12 @@ A play-money prediction market for friend groups. Ask a question in the chat ("W
 
 The game engine knows nothing about chat apps. Adapters translate platform messages into `handleCommand(...)` and send back the string it returns. Included: a terminal simulator and adapters for **Telegram**, **Discord** and **WhatsApp**.
 
+## Demo
+
+<video src="https://github.com/sk82santhosh-cpu/Betbot/raw/main/docs/demo.mp4" controls muted width="360"></video>
+
+[Watch the demo](docs/demo.mp4)
+
 > **Disclaimer.** WhatsApp mode uses [Baileys](https://github.com/WhiskeySockets/Baileys), an *unofficial* library. It may violate WhatsApp's Terms of Service and the number you connect **may get banned**. Use a spare number. Self-host only. Points are play points with no monetary value.
 
 ## Commands

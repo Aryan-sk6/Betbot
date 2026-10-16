@@ -1,14 +1,8 @@
 import type { Db } from "../db/db.js";
 import { parseCommand, type Command } from "./commands.js";
 import * as ledger from "./ledger.js";
-import {
-  applyShares,
-  priceYes,
-  proceedsForShares,
-  sharesForPoints,
-  type MarketState,
-  type Side,
-} from "./market.js";
+import { applyShares, prices, proceedsForShares, sharesForPoints, type MarketState } from "./market.js";
+import { display, isYesNo, matchOption, validateOptions } from "./options.js";
 import { DEFAULT_TZ, formatWhen, isValidTz, parseWhen } from "./time.js";
 
 export interface IncomingMessage {
@@ -31,7 +25,7 @@ export type Actor = Omit<IncomingMessage, "text">;
 
 export interface ChatContext {
   /** Markets that can still be acted on: open, or closed and awaiting resolution. */
-  markets: { num: number; question: string; status: "open" | "closed" }[];
+  markets: { num: number; question: string; status: "open" | "closed"; options: string[] }[];
   /** The caller's balance (the starting balance if they have not played yet). */
   balance: number;
 }
@@ -62,28 +56,47 @@ interface MarketRow {
   question: string;
   creator_id: number;
   status: "open" | "closed" | "resolved" | "void";
-  resolution: Side | null;
+  resolution_idx: number | null;
   b: number;
-  q_yes: number;
-  q_no: number;
   closes_at: number | null;
   created_at: number;
 }
 
-const state = (m: MarketRow): MarketState => ({ qYes: m.q_yes, qNo: m.q_no, b: m.b });
+interface Outcome {
+  idx: number;
+  label: string;
+  q: number;
+}
+
+type Market = MarketRow & { outcomes: Outcome[] };
+
+const state = (m: Market): MarketState => ({ q: m.outcomes.map((o) => o.q), b: m.b });
+const labels = (m: Market): string[] => m.outcomes.map((o) => o.label);
 const pct = (p: number) => `${Math.round(p * 100)}%`;
 const fmtShares = (n: number) => String(Math.round(n * 10) / 10);
-const upper = (s: Side) => s.toUpperCase();
+
+/** "64% YES / 36% NO" for yes/no markets, "India 55% / Australia 30% / Draw 15%" otherwise. */
+function oddsText(m: Market, s: MarketState = state(m)): string {
+  const p = prices(s);
+  if (isYesNo(labels(m))) return `${pct(p[0])} YES / ${pct(p[1])} NO`;
+  return m.outcomes.map((o, i) => `${display(o.label)} ${pct(p[i])}`).join(" / ");
+}
+
+/** Compact odds for replies: yes/no markets show just the YES price. */
+function shortOdds(m: Market, s: MarketState): string {
+  return isYesNo(labels(m)) ? `${pct(prices(s)[0])} YES` : oddsText(m, s);
+}
 
 const HELP = [
   "Betbot: play-money predictions (no real money, ever)",
-  "/new <question> | closes <time>  create a market",
-  "/bet [#id] yes|no <points>  buy shares",
-  "/sell [#id] yes|no <shares|all>  sell shares back",
+  "/new <question> | closes <time>  create a yes/no market",
+  "/new <question> | options A, B, C | closes <time>  create a market with your own options",
+  "/bet [#id] <option> <points>  buy shares (option = yes/no, a name, or its number)",
+  "/sell [#id] <option> <shares|all>  sell shares back",
   "/odds [#id]  odds and volume",
   "/markets  open markets",
   "/market <#id>  details and top holders",
-  "/resolve <#id> yes|no  creator only",
+  "/resolve <#id> <option>  creator only",
   "/void <#id>  refund everyone, creator only",
   "/balance  your points",
   "/leaderboard  group ranking",
@@ -126,16 +139,30 @@ export function createEngine(opts: EngineOptions): Engine {
     ).run(groupId, now());
   }
 
-  function getMarket(groupId: string, num: number): MarketRow {
-    const m = db.prepare(`SELECT * FROM markets WHERE group_id = ? AND num = ?`).get(groupId, num) as
-      | MarketRow
-      | undefined;
+  function withOutcomes(row: MarketRow): Market {
+    const outcomes = db.prepare(`SELECT idx, label, q FROM outcomes WHERE market_id = ? ORDER BY idx`).all(row.id) as Outcome[];
+    return { ...row, outcomes };
+  }
+
+  function getMarket(groupId: string, num: number): Market {
+    const m = db.prepare(`SELECT * FROM markets WHERE group_id = ? AND num = ?`).get(groupId, num) as MarketRow | undefined;
     if (!m) throw new UserError(`No market #${num} in this group.`);
-    return m;
+    return withOutcomes(m);
+  }
+
+  /** Resolve what the user typed to one of the market's options. */
+  function pickOutcome(m: Market, text: string): Outcome {
+    const r = matchOption(labels(m), text);
+    if ("index" in r) return m.outcomes[r.index];
+    const list = m.outcomes.map((o, i) => `${i + 1}. ${display(o.label)}`).join("  ");
+    if (r.error === "ambiguous") {
+      throw new UserError(`"${text}" matches several options in #${m.num}: ${r.candidates.map(display).join(", ")}. Be more specific.`);
+    }
+    throw new UserError(`No option "${text}" in #${m.num}. Options: ${list}`);
   }
 
   /** Market for /bet and /sell: explicit id, or the only open market. */
-  function pickMarket(groupId: string, num: number | undefined, verb: string): MarketRow {
+  function pickMarket(groupId: string, num: number | undefined, verb: string): Market {
     if (num !== undefined) return getMarket(groupId, num);
     const open = db
       .prepare(`SELECT * FROM markets WHERE group_id = ? AND status = 'open' ORDER BY num`)
@@ -145,10 +172,10 @@ export function createEngine(opts: EngineOptions): Engine {
       const list = open.map((m) => `#${m.num} ${m.question}`).join("\n");
       throw new UserError(`Several open markets, say which one: /${verb} <#id> ...\n${list}`);
     }
-    return open[0];
+    return withOutcomes(open[0]);
   }
 
-  function requireOpen(m: MarketRow): void {
+  function requireOpen(m: Market): void {
     if (m.status === "open" && (m.closes_at === null || m.closes_at > now())) return;
     const why = m.status === "open" ? "closed" : m.status;
     throw new UserError(`Market #${m.num} is ${why}, no more trading.`);
@@ -165,11 +192,10 @@ export function createEngine(opts: EngineOptions): Engine {
     return (db.prepare(`SELECT display_name FROM users WHERE id = ?`).get(userId) as { display_name: string }).display_name;
   }
 
-  const closesText = (m: MarketRow) => (m.closes_at ? `closes ${formatWhen(m.closes_at, tz)}` : "no deadline");
+  const closesText = (m: Market) => (m.closes_at ? `closes ${formatWhen(m.closes_at, tz)}` : "no deadline");
 
-  function oddsLine(m: MarketRow): string {
-    const p = priceYes(state(m));
-    return `#${m.num} ${m.question}\n   ${pct(p)} YES / ${pct(1 - p)} NO · vol ${volume(m.id)} · ${closesText(m)}`;
+  function oddsLine(m: Market): string {
+    return `#${m.num} ${m.question}\n   ${oddsText(m)} · vol ${volume(m.id)} · ${closesText(m)}`;
   }
 
   // ---- command handlers (each runs synchronously inside one transaction) -----
@@ -182,102 +208,121 @@ export function createEngine(opts: EngineOptions): Engine {
         throw new UserError(`Couldn't read the close time "${c.closes}" (or it's in the past). Try "fri 6pm", "in 2h", "tomorrow 9am".`);
       }
     }
+    const opts = (c.options ?? ["Yes", "No"]).map((o) => o.trim().replace(/\s+/g, " "));
+    const problem = validateOptions(opts);
+    if (problem) throw new UserError(problem);
     const b = c.b ?? defaultB;
     const next = db.prepare(`SELECT COALESCE(MAX(num), 0) + 1 AS n FROM markets WHERE group_id = ?`).get(g) as { n: number };
-    db.prepare(
-      `INSERT INTO markets (group_id, num, question, creator_id, b, closes_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(g, next.n, c.question, user.id, b, closesAt, now());
+    const info = db
+      .prepare(`INSERT INTO markets (group_id, num, question, creator_id, b, closes_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(g, next.n, c.question, user.id, b, closesAt, now());
+    const insert = db.prepare(`INSERT INTO outcomes (market_id, idx, label, q) VALUES (?, ?, ?, 0)`);
+    opts.forEach((label, i) => insert.run(info.lastInsertRowid, i, label));
     const when = closesAt ? `Closes ${formatWhen(closesAt, tz)}.` : "No deadline.";
-    return `Market #${next.n} created by ${user.display_name}: ${c.question}\nOdds 50% YES. ${when}\nBet with /bet yes 50 or /bet no 50`;
+    const head = `Market #${next.n} created by ${user.display_name}: ${c.question}`;
+    if (!c.options) return `${head}\nOdds 50% YES. ${when}\nBet with /bet yes 50 or /bet no 50`;
+    const list = opts.map((o, i) => `${i + 1}. ${o}`).join("  ");
+    return `${head}\nOptions: ${list} (${pct(1 / opts.length)} each). ${when}\nBet with /bet ${opts[0]} 50 (or /bet 1 50), and use #${next.n} if several markets are open.`;
   }
 
   function cmdBet(g: string, user: UserRow, c: Extract<Command, { type: "bet" }>): string {
     const m = pickMarket(g, c.marketNum, "bet");
     requireOpen(m);
+    const o = pickOutcome(m, c.option);
     const bal = ledger.balance(db, g, user.id);
     if (c.points > bal) throw new UserError(`${user.display_name}, you only have ${bal} points.`);
     const s = state(m);
-    const shares = sharesForPoints(s, c.side, c.points);
+    const shares = sharesForPoints(s, o.idx, c.points);
     if (!(shares > 0) || !Number.isFinite(shares)) throw new UserError("That bet is too small to buy any shares.");
-    const next = applyShares(s, c.side, shares);
-    db.prepare(`UPDATE markets SET q_yes = ?, q_no = ? WHERE id = ?`).run(next.qYes, next.qNo, m.id);
-    const col = c.side === "yes" ? "yes_shares" : "no_shares";
+    const next = applyShares(s, o.idx, shares);
+    db.prepare(`UPDATE outcomes SET q = ? WHERE market_id = ? AND idx = ?`).run(next.q[o.idx], m.id, o.idx);
     db.prepare(
-      `INSERT INTO positions (market_id, user_id, ${col}) VALUES (?, ?, ?)
-       ON CONFLICT (market_id, user_id) DO UPDATE SET ${col} = ${col} + excluded.${col}`,
-    ).run(m.id, user.id, shares);
+      `INSERT INTO holdings (market_id, user_id, outcome_idx, shares) VALUES (?, ?, ?, ?)
+       ON CONFLICT (market_id, user_id, outcome_idx) DO UPDATE SET shares = shares + excluded.shares`,
+    ).run(m.id, user.id, o.idx, shares);
     ledger.postWithAmm(db, { userId: user.id, groupId: g, userDelta: -c.points, reason: "bet", marketId: m.id, ts: now() });
-    return `${user.display_name} bets ${upper(c.side)} ${c.points} on #${m.num} -> ${fmtShares(shares)} shares @ avg ${(c.points / shares).toFixed(2)}. Odds now ${pct(priceYes(next))} YES. Balance: ${bal - c.points}.`;
+    return `${user.display_name} bets ${display(o.label)} ${c.points} on #${m.num} -> ${fmtShares(shares)} shares @ avg ${(c.points / shares).toFixed(2)}. Odds now ${shortOdds(m, next)}. Balance: ${bal - c.points}.`;
   }
 
   function cmdSell(g: string, user: UserRow, c: Extract<Command, { type: "sell" }>): string {
     const m = pickMarket(g, c.marketNum, "sell");
     requireOpen(m);
-    const pos = db.prepare(`SELECT yes_shares, no_shares FROM positions WHERE market_id = ? AND user_id = ?`).get(m.id, user.id) as
-      | { yes_shares: number; no_shares: number }
-      | undefined;
-    const held = pos ? (c.side === "yes" ? pos.yes_shares : pos.no_shares) : 0;
-    if (held <= 1e-9) throw new UserError(`${user.display_name}, you hold no ${upper(c.side)} shares in #${m.num}.`);
+    const o = pickOutcome(m, c.option);
+    const row = db
+      .prepare(`SELECT shares FROM holdings WHERE market_id = ? AND user_id = ? AND outcome_idx = ?`)
+      .get(m.id, user.id, o.idx) as { shares: number } | undefined;
+    const held = row?.shares ?? 0;
+    if (held <= 1e-9) throw new UserError(`${user.display_name}, you hold no ${display(o.label)} shares in #${m.num}.`);
     let shares = c.shares === "all" ? held : c.shares;
     // Displayed share counts are rounded, so accept a request slightly above what's held.
     if (shares > held && shares <= held + 0.05) shares = held;
-    if (shares > held) throw new UserError(`${user.display_name}, you only hold ${fmtShares(held)} ${upper(c.side)} shares in #${m.num}.`);
+    if (shares > held) throw new UserError(`${user.display_name}, you only hold ${fmtShares(held)} ${display(o.label)} shares in #${m.num}.`);
     const s = state(m);
-    const proceeds = Math.floor(proceedsForShares(s, c.side, shares) + 1e-9);
+    const proceeds = Math.floor(proceedsForShares(s, o.idx, shares) + 1e-9);
     if (proceeds < 1) throw new UserError("Those shares are worth less than 1 point right now.");
-    const next = applyShares(s, c.side, -shares);
-    db.prepare(`UPDATE markets SET q_yes = ?, q_no = ? WHERE id = ?`).run(next.qYes, next.qNo, m.id);
-    const col = c.side === "yes" ? "yes_shares" : "no_shares";
-    db.prepare(`UPDATE positions SET ${col} = MAX(0, ${col} - ?) WHERE market_id = ? AND user_id = ?`).run(shares, m.id, user.id);
+    const next = applyShares(s, o.idx, -shares);
+    db.prepare(`UPDATE outcomes SET q = ? WHERE market_id = ? AND idx = ?`).run(next.q[o.idx], m.id, o.idx);
+    db.prepare(`UPDATE holdings SET shares = MAX(0, shares - ?) WHERE market_id = ? AND user_id = ? AND outcome_idx = ?`).run(
+      shares,
+      m.id,
+      user.id,
+      o.idx,
+    );
     ledger.postWithAmm(db, { userId: user.id, groupId: g, userDelta: proceeds, reason: "sell", marketId: m.id, ts: now() });
     const bal = ledger.balance(db, g, user.id);
-    return `${user.display_name} sells ${fmtShares(shares)} ${upper(c.side)} on #${m.num} -> +${proceeds} points. Odds now ${pct(priceYes(next))} YES. Balance: ${bal}.`;
+    return `${user.display_name} sells ${fmtShares(shares)} ${display(o.label)} on #${m.num} -> +${proceeds} points. Odds now ${shortOdds(m, next)}. Balance: ${bal}.`;
   }
 
   function cmdOdds(g: string, c: Extract<Command, { type: "odds" }>): string {
     if (c.marketNum !== undefined) return oddsLine(getMarket(g, c.marketNum));
-    const open = db.prepare(`SELECT * FROM markets WHERE group_id = ? AND status = 'open' ORDER BY num`).all(g) as MarketRow[];
+    const open = (db.prepare(`SELECT * FROM markets WHERE group_id = ? AND status = 'open' ORDER BY num`).all(g) as MarketRow[]).map(withOutcomes);
     return open.length ? open.map(oddsLine).join("\n") : "No open markets.";
   }
 
   function cmdMarkets(g: string): string {
-    const rows = db
-      .prepare(`SELECT * FROM markets WHERE group_id = ? AND status IN ('open','closed') ORDER BY status DESC, num`)
-      .all(g) as MarketRow[];
+    const rows = (
+      db.prepare(`SELECT * FROM markets WHERE group_id = ? AND status IN ('open','closed') ORDER BY status DESC, num`).all(g) as MarketRow[]
+    ).map(withOutcomes);
     if (!rows.length) return "No open markets. Start one with /new <question> | closes <time>";
     const lines = rows.map((m) => {
       const tag = m.status === "closed" ? " [closed, awaiting resolution]" : "";
-      return `#${m.num} ${m.question} — ${pct(priceYes(state(m)))} YES${tag}`;
+      let odds: string;
+      if (isYesNo(labels(m))) odds = `${pct(prices(state(m))[0])} YES`;
+      else {
+        const p = prices(state(m));
+        const ranked = m.outcomes.map((o, i) => ({ o, p: p[i] })).sort((a, b) => b.p - a.p);
+        odds = ranked.slice(0, 3).map((r) => `${display(r.o.label)} ${pct(r.p)}`).join(", ") + (ranked.length > 3 ? ` +${ranked.length - 3} more` : "");
+      }
+      return `#${m.num} ${m.question} — ${odds}${tag}`;
     });
     return lines.join("\n");
   }
 
   function cmdMarket(g: string, c: Extract<Command, { type: "market" }>): string {
     const m = getMarket(g, c.marketNum);
-    const status =
-      m.status === "resolved" ? `resolved ${upper(m.resolution!)}` : m.status === "void" ? "void (refunded)" : m.status;
-    const holders = (col: "yes_shares" | "no_shares") =>
+    const winner = m.resolution_idx === null ? undefined : m.outcomes[m.resolution_idx];
+    const status = m.status === "resolved" && winner ? `resolved ${display(winner.label)}` : m.status === "void" ? "void (refunded)" : m.status;
+    const holders = (idx: number) =>
       (
         db
           .prepare(
-            `SELECT u.display_name AS name, p.${col} AS s FROM positions p JOIN users u ON u.id = p.user_id
-             WHERE p.market_id = ? AND p.${col} > 0.05 ORDER BY p.${col} DESC LIMIT 3`,
+            `SELECT u.display_name AS name, h.shares AS s FROM holdings h JOIN users u ON u.id = h.user_id
+             WHERE h.market_id = ? AND h.outcome_idx = ? AND h.shares > 0.05 ORDER BY h.shares DESC LIMIT 3`,
           )
-          .all(m.id) as { name: string; s: number }[]
+          .all(m.id, idx) as { name: string; s: number }[]
       )
         .map((h) => `${h.name} ${fmtShares(h.s)}`)
         .join(", ") || "none";
     return [
       `#${m.num} ${m.question}`,
       `Status: ${status} · by ${nameOf(m.creator_id)} · ${closesText(m)}`,
-      `Odds: ${pct(priceYes(state(m)))} YES / ${pct(1 - priceYes(state(m)))} NO · volume ${volume(m.id)}`,
-      `Top YES: ${holders("yes_shares")}`,
-      `Top NO: ${holders("no_shares")}`,
+      `Odds: ${oddsText(m)} · volume ${volume(m.id)}`,
+      ...m.outcomes.map((o) => `Top ${display(o.label)}: ${holders(o.idx)}`),
     ].join("\n");
   }
 
   /** Only the person who created a market with /new may settle or cancel it. */
-  function requireCreator(m: MarketRow, user: UserRow): void {
+  function requireCreator(m: Market, user: UserRow): void {
     if (m.creator_id !== user.id) throw new UserError(`Only the market creator (${nameOf(m.creator_id)}) can do that.`);
   }
 
@@ -285,10 +330,10 @@ export function createEngine(opts: EngineOptions): Engine {
     const m = getMarket(g, c.marketNum);
     requireCreator(m, user);
     if (m.status === "resolved" || m.status === "void") throw new UserError(`Market #${m.num} is already ${m.status}.`);
-    const col = c.outcome === "yes" ? "yes_shares" : "no_shares";
+    const won = pickOutcome(m, c.option);
     const winners = db
-      .prepare(`SELECT p.user_id AS userId, p.${col} AS shares FROM positions p WHERE p.market_id = ? AND p.${col} > 0`)
-      .all(m.id) as { userId: number; shares: number }[];
+      .prepare(`SELECT user_id AS userId, shares FROM holdings WHERE market_id = ? AND outcome_idx = ? AND shares > 0`)
+      .all(m.id, won.idx) as { userId: number; shares: number }[];
     let paid = 0;
     const lines: string[] = [];
     for (const w of winners) {
@@ -298,9 +343,9 @@ export function createEngine(opts: EngineOptions): Engine {
       paid += payout;
       lines.push(`${nameOf(w.userId)} +${payout}`);
     }
-    db.prepare(`UPDATE markets SET status = 'resolved', resolution = ? WHERE id = ?`).run(c.outcome, m.id);
+    db.prepare(`UPDATE markets SET status = 'resolved', resolution_idx = ? WHERE id = ?`).run(won.idx, m.id);
     const tail = lines.length ? `\nPayouts (${paid} pts): ${lines.join(", ")}` : "\nNo winning shares.";
-    return `Market #${m.num} resolved ${upper(c.outcome)}: ${m.question}${tail}`;
+    return `Market #${m.num} resolved ${display(won.label)}: ${m.question}${tail}`;
   }
 
   function cmdVoid(g: string, user: UserRow, c: Extract<Command, { type: "void" }>): string {
@@ -348,12 +393,21 @@ export function createEngine(opts: EngineOptions): Engine {
   function getContext(groupId: string, userId: string): ChatContext {
     closeExpired(groupId);
     const markets = db
-      .prepare(`SELECT num, question, status FROM markets WHERE group_id = ? AND status IN ('open','closed') ORDER BY num`)
-      .all(groupId) as ChatContext["markets"];
+      .prepare(`SELECT id, num, question, status FROM markets WHERE group_id = ? AND status IN ('open','closed') ORDER BY num`)
+      .all(groupId) as { id: number; num: number; question: string; status: "open" | "closed" }[];
     const user = db.prepare(`SELECT id FROM users WHERE group_id = ? AND platform_id = ?`).get(groupId, userId) as
       | { id: number }
       | undefined;
-    return { markets, balance: user ? ledger.balance(db, groupId, user.id) : startingBalance };
+    const optionsOf = db.prepare(`SELECT label FROM outcomes WHERE market_id = ? ORDER BY idx`);
+    return {
+      markets: markets.map((m) => ({
+        num: m.num,
+        question: m.question,
+        status: m.status,
+        options: (optionsOf.all(m.id) as { label: string }[]).map((o) => o.label),
+      })),
+      balance: user ? ledger.balance(db, groupId, user.id) : startingBalance,
+    };
   }
 
   async function execute(msg: Actor, cmd: Command): Promise<string> {

@@ -139,7 +139,7 @@ export function createTelegramHandler(opts: {
     }
     const ctx = engine.getContext(actor.groupId, actor.userId);
     const result = await nlu.parse(text, {
-      openMarkets: ctx.markets.map((x) => ({ id: x.num, question: x.question })),
+      openMarkets: ctx.markets.map((x) => ({ id: x.num, question: x.question, options: x.options })),
       now: new Date(now()).toISOString(),
       timezone: tz,
       userDisplayName: actor.displayName,

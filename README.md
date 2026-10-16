@@ -18,17 +18,28 @@ The game engine knows nothing about chat apps. Adapters translate platform messa
 
 | Command | What it does |
 |---|---|
-| `/new <question> \| closes <time>` | Create a market. Time: `fri 6pm`, `in 2h`, `tomorrow 9am`. Optional `\| b 200` sets liquidity. |
-| `/bet [#id] yes\|no <points>` | Spend points on a side. `#id` is only needed when several markets are open. |
-| `/sell [#id] yes\|no <shares\|all>` | Sell shares back at the current price. |
+| `/new <question> \| closes <time>` | Create a yes/no market. Time: `fri 6pm`, `in 2h`, `tomorrow 9am`. Optional `\| b 200` sets liquidity. |
+| `/new <question> \| options A, B, C \| closes <time>` | Create a market with **your own options** (2 to 10). |
+| `/bet [#id] <option> <points>` | Spend points on an option: `yes`/`no`, its name (`/bet Real Madrid 50`), a unique start of the name (`/bet aus 50`), or its number (`/bet 2 50`). `#id` is only needed when several markets are open. |
+| `/sell [#id] <option> <shares\|all>` | Sell shares back at the current price. |
 | `/odds [#id]` | Odds and volume. |
 | `/markets` | Open markets (and closed ones awaiting resolution). |
 | `/market <#id>` | Details, odds, top holders. |
-| `/resolve <#id> yes\|no` | Settle a market. **Only the person who created it with `/new`.** |
+| `/resolve <#id> <option>` | Say which option won. **Only the person who created the market with `/new`.** |
 | `/void <#id>` | Cancel and refund everyone's net spend. Only the market's creator. |
 | `/balance` | Your points (or an @mentioned player's). |
 | `/leaderboard` | This group's ranking. |
 | `/help` | Command list. |
+
+Markets are yes/no by default. Add `options` for anything else:
+
+```
+/new Who wins the match? | options India, Australia, Draw | closes fri 6pm
+/bet india 100        (or /bet ind 100, or /bet 1 100)
+/resolve 1 australia
+```
+
+Option names can have spaces (`Real Madrid`), can't be only a number, and must be unique. If several markets are open, name the one you mean with `#`, e.g. `/bet #2 draw 50`.
 
 Everyone starts with 1000 points per group. Every group has its own economy, markets (`#1`, `#2`, ...) and leaderboard. Markets close automatically at their deadline; the creator can still resolve them afterwards. Default timezone is `Asia/Kolkata` (set `TZ` to change).
 
@@ -36,10 +47,10 @@ Everyone starts with 1000 points per group. Every group has its own economy, mar
 
 Markets use Hanson's **LMSR** (logarithmic market scoring rule), an automated market maker. You never need a counterparty: the market always quotes a price.
 
-- The market tracks how many YES and NO shares exist (`qy`, `qn`). A share pays 1 point if its side wins, 0 otherwise.
-- The price of YES is `e^(qy/b) / (e^(qy/b) + e^(qn/b))`, which is also the market's probability. It starts at 50%.
-- Buying YES raises its price, so early believers get a better average price than latecomers. Spending 50 points when the price is 0.70 gives you roughly 71 shares, not 50/0.70, because your own purchase moves the price as you go.
-- `b` controls depth. Higher `b` means prices move less per point (default 100). The market maker can lose at most `b * ln 2` points per market, which is the "subsidy" that makes trading always possible.
+- The market tracks how many shares exist of each option (`q_1 ... q_N`; yes/no is just N = 2). A share pays 1 point if its option wins, 0 otherwise.
+- The price of option *i* is `e^(q_i/b) / (e^(q_1/b) + ... + e^(q_N/b))`, which is also the market's probability. The prices always add up to 100%, and start even (50% for yes/no, 33% each for three options).
+- Buying an option raises its price and lowers all the others, so early believers get a better average price than latecomers. Spending 50 points when the price is 0.70 gives you roughly 71 shares, not 50/0.70, because your own purchase moves the price as you go.
+- `b` controls depth. Higher `b` means prices move less per point (default 100). The market maker can lose at most `b * ln(N)` points per market (`N` = number of options), which is the "subsidy" that makes trading always possible.
 - Selling shares back is the same curve in reverse, so buying then selling immediately returns what you paid (before whole-point rounding).
 
 Bookkeeping: balances are never stored; they are `SUM(delta)` over an append-only ledger (enforced by SQLite triggers). The market maker has its own ledger rows, written as a pair with every user row, so the sum of the whole group's ledger always equals the signup grants. A test checks this across bets, sells, resolves and voids. Shares are floats, points are whole numbers; payouts and sale proceeds round down in the market maker's favour.
@@ -114,6 +125,7 @@ On Telegram you can write plain English instead of strict commands, if you confi
 > @betbot put 50 on yes for the rahul thing
 > @betbot what are the odds on the rain one?
 > (replying to a bot message) sell all my no
+> @betbot start a market on who wins the match: india, australia or draw, closes tomorrow 6pm
 
 How it works:
 
@@ -218,7 +230,7 @@ The NLU code lives in `src/core/nlu.ts` and `src/core/llm/` and is platform-agno
 
 ```
 src/core/      commands, LMSR math, ledger, engine, optional nlu + llm/ providers (no adapter imports)
-src/db/        schema.sql + migrations
+src/db/        schema.sql + numbered migrations (existing databases upgrade automatically on startup)
 src/adapters/  cli.ts, whatsapp.ts, telegram.ts, discord.ts
 tests/         vitest
 ```

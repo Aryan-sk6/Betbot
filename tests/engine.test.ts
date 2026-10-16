@@ -183,7 +183,7 @@ describe("full scenario", () => {
 
     // Exact payouts: each winning share pays 1 point (floored).
     const sharesOf = (u: string) =>
-      (db.prepare(`SELECT yes_shares y FROM positions WHERE user_id = ?`).get(uid(u)) as { y: number }).y;
+      (db.prepare(`SELECT shares y FROM holdings WHERE user_id = ? AND outcome_idx = 0`).get(uid(u)) as { y: number }).y;
     const khushPayout = Math.floor(sharesOf("khush") + 1e-9);
     const rahulPayout = Math.floor(sharesOf("rahul") + 1e-9);
 
@@ -211,5 +211,126 @@ describe("full scenario", () => {
     expect(d).toContain("Top YES: khush");
     expect(d).toContain("Top NO: none");
     expect(await say("meera", "/odds")).toContain("YES");
+  });
+});
+
+describe("custom options", () => {
+  beforeEach(async () => {
+    await say("rahul", "/new Who wins the match? | options India, Australia, Real Madrid | closes in 2h");
+  });
+
+  it("announces the options and starts them even", async () => {
+    await say("x", "/balance");
+    const r = (await say("rahul", "/new Pick one | options A, B, C, D"))!;
+    expect(r).toContain("Options: 1. A  2. B  3. C  4. D (25% each)");
+    expect(await say("rahul", "/odds #2")).toContain("A 25% / B 25% / C 25% / D 25%");
+  });
+
+  it("bets by name, by prefix, by number, and by multi-word name", async () => {
+    expect(await say("khush", "/bet india 100")).toMatch(/^khush bets India 100 on #1 -> [\d.]+ shares @ avg 0\.\d\d\. Odds now India \d+% \/ Australia \d+% \/ Real Madrid \d+%\. Balance: 900\.$/);
+    expect(await say("khush", "/bet aus 50")).toContain("bets Australia 50");
+    expect(await say("khush", "/bet 3 50")).toContain("bets Real Madrid 50");
+    expect(await say("khush", "/bet Real Madrid 25")).toContain("bets Real Madrid 25");
+    expect(await say("khush", "/bet #1 real madrid 25")).toContain("bets Real Madrid 25");
+    expect(bal("khush")).toBe(1000 - 100 - 50 - 50 - 25 - 25);
+    invariant();
+  });
+
+  it("betting on one option moves the others down together", async () => {
+    await say("khush", "/bet india 300");
+    const odds = (await say("khush", "/odds"))!;
+    const [, india, aus, rm] = odds.match(/India (\d+)% \/ Australia (\d+)% \/ Real Madrid (\d+)%/)!.map(Number);
+    expect(india).toBeGreaterThan(33);
+    expect(aus).toBe(rm);
+    expect(india + aus + rm).toBeGreaterThanOrEqual(99);
+  });
+
+  it("explains unknown and ambiguous options", async () => {
+    await say("rahul", "/new Colors | options Red, Reds, Blue");
+    expect(await say("khush", "/bet #2 re 10")).toContain('"re" matches several options in #2: Red, Reds');
+    expect(await say("khush", "/bet #2 green 10")).toBe('No option "green" in #2. Options: 1. Red  2. Reds  3. Blue');
+    expect(await say("khush", "/bet #2 red 10")).toContain("bets Red 10"); // exact beats prefix
+    expect(bal("khush")).toBe(990);
+  });
+
+  it("yes and no do not exist on a custom market", async () => {
+    expect(await say("khush", "/bet yes 10")).toContain('No option "yes"');
+  });
+
+  it("rejects bad option lists", async () => {
+    expect(await say("rahul", "/new Q | options Only")).toContain("at least 2");
+    expect(await say("rahul", "/new Q | options A, B, a")).toContain("Duplicate");
+    expect(await say("rahul", "/new Q | options A, 9")).toContain("number");
+    expect(await say("rahul", "/new Q | options " + Array.from({ length: 11 }, (_, i) => `o${i}`).join(","))).toContain("At most 10");
+  });
+
+  it("sells a specific option back", async () => {
+    await say("khush", "/bet australia 200");
+    await say("khush", "/bet india 100");
+    expect(await say("khush", "/sell india all")).toMatch(/sells [\d.]+ India on #1 -> \+\d+ points/);
+    expect(await say("khush", "/sell india 1")).toContain("hold no India shares");
+    expect(await say("khush", "/sell australia 99999")).toContain("only hold");
+    invariant();
+  });
+
+  it("resolving pays only the winning option and conserves points", async () => {
+    await say("khush", "/bet india 200");
+    await say("meera", "/bet australia 150");
+    await say("meera", "/bet real madrid 100");
+    await say("khush", "/bet real madrid 40");
+    const holding = (u: string, idx: number) =>
+      (db.prepare(`SELECT shares s FROM holdings WHERE user_id = ? AND outcome_idx = ?`).get(uid(u), idx) as { s: number }).s;
+    const khushWin = Math.floor(holding("khush", 0) + 1e-9);
+
+    expect(await say("khush", "/resolve 1 india")).toContain("Only the market creator");
+    const r = (await say("rahul", "/resolve 1 india"))!;
+    expect(r).toContain("resolved India");
+    expect(r).toContain(`khush +${khushWin}`);
+    expect(r).not.toContain("meera");
+    expect(bal("khush")).toBe(1000 - 200 - 40 + khushWin);
+    expect(bal("meera")).toBe(1000 - 150 - 100);
+    expect(await say("khush", "/market 1")).toContain("Status: resolved India");
+    invariant();
+  });
+
+  it("can resolve by option number, and rejects an unknown winner", async () => {
+    await say("khush", "/bet 2 100");
+    expect(await say("rahul", "/resolve 1 spain")).toContain('No option "spain"');
+    expect((db.prepare(`SELECT status FROM markets WHERE num = 1`).get() as { status: string }).status).toBe("open");
+    expect(await say("rahul", "/resolve 1 2")).toContain("resolved Australia");
+    invariant();
+  });
+
+  it("void refunds across all options", async () => {
+    await say("khush", "/bet india 100");
+    await say("meera", "/bet australia 70");
+    await say("khush", "/bet real madrid 30");
+    await say("rahul", "/void 1");
+    expect(bal("khush")).toBe(1000);
+    expect(bal("meera")).toBe(1000);
+    invariant();
+  });
+
+  it("market details list top holders per option", async () => {
+    await say("khush", "/bet india 100");
+    const d = (await say("meera", "/market 1"))!;
+    expect(d).toContain("Top India: khush");
+    expect(d).toContain("Top Australia: none");
+    expect(d).toContain("Top Real Madrid: none");
+  });
+
+  it("the market list shows the leading options", async () => {
+    await say("rahul", "/new Five-way | options A, B, C, D, E");
+    await say("khush", "/bet #2 d 200");
+    const list = (await say("khush", "/markets"))!;
+    expect(list).toContain("#2 Five-way — D ");
+    expect(list).toContain("+2 more");
+    expect(list).toContain("#3 Who wins".replace("#3", "#1"));
+  });
+
+  it("yes/no markets are unchanged beside custom ones", async () => {
+    await say("rahul", "/new Plain question");
+    expect(await say("khush", "/bet #2 yes 50")).toMatch(/bets YES 50 on #2 .* Odds now \d+% YES\./);
+    expect(await say("khush", "/odds #2")).toContain("% YES /");
   });
 });

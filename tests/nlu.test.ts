@@ -13,8 +13,9 @@ import type { LlmProvider, ToolCall } from "../src/core/llm/types.js";
 
 const ctx: NluContext = {
   openMarkets: [
-    { id: 1, question: "Will Rahul finish the project by Friday?" },
-    { id: 2, question: "Will it rain tomorrow?" },
+    { id: 1, question: "Will Rahul finish the project by Friday?", options: ["Yes", "No"] },
+    { id: 2, question: "Will it rain tomorrow?", options: ["Yes", "No"] },
+    { id: 3, question: "Who wins the match?", options: ["India", "Australia", "Draw"] },
   ],
   now: "2026-10-14T04:30:00.000Z",
   timezone: "Asia/Kolkata",
@@ -33,20 +34,20 @@ const submit = (args: Record<string, unknown>): ToolCall => ({ name: "submit_com
 
 describe("nlu.parse: valid output becomes the right Command", () => {
   it("bet on the market the model picked", async () => {
-    const { provider } = mock(submit({ type: "bet", side: "yes", points: 50, marketNum: 1 }));
-    expect(await parse("put 50 on yes for the rahul thing", ctx, provider)).toEqual({ type: "bet", side: "yes", points: 50, marketNum: 1 });
+    const { provider } = mock(submit({ type: "bet", option: "yes", points: 50, marketNum: 1 }));
+    expect(await parse("put 50 on yes for the rahul thing", ctx, provider)).toEqual({ type: "bet", option: "Yes", points: 50, marketNum: 1 });
   });
 
   it("coerces numeric strings, drops nulls, normalizes case", async () => {
-    const { provider } = mock(submit({ type: "BET", side: "No", points: "75", marketNum: "#2", question: null, closes: "" }));
-    expect(await parse("75 on no for rain", ctx, provider)).toEqual({ type: "bet", side: "no", points: 75, marketNum: 2 });
+    const { provider } = mock(submit({ type: "BET", option: "No", points: "75", marketNum: "#2", question: null, closes: "" }));
+    expect(await parse("75 on no for rain", ctx, provider)).toEqual({ type: "bet", option: "No", points: 75, marketNum: 2 });
   });
 
   it("sell all and numeric shares", async () => {
-    expect(await parse("dump my yes", ctx, mock(submit({ type: "sell", side: "yes", shares: "all", marketNum: 2 })).provider)).toEqual({
-      type: "sell", side: "yes", shares: "all", marketNum: 2,
+    expect(await parse("dump my yes", ctx, mock(submit({ type: "sell", option: "yes", shares: "all", marketNum: 2 })).provider)).toEqual({
+      type: "sell", option: "Yes", shares: "all", marketNum: 2,
     });
-    expect(await parse("sell 12.5", ctx, mock(submit({ type: "sell", side: "no", shares: "12.5", marketNum: 1 })).provider)).toMatchObject({ shares: 12.5 });
+    expect(await parse("sell 12.5", ctx, mock(submit({ type: "sell", option: "no", shares: "12.5", marketNum: 1 })).provider)).toMatchObject({ shares: 12.5 });
   });
 
   it("new market passes question and deadline through", async () => {
@@ -63,7 +64,7 @@ describe("nlu.parse: valid output becomes the right Command", () => {
 
   it("pins the only open market so the engine acts on what the model saw", async () => {
     const one = { ...ctx, openMarkets: [ctx.openMarkets[0]] };
-    expect(await parse("50 on yes", one, mock(submit({ type: "bet", side: "yes", points: 50 })).provider)).toMatchObject({ marketNum: 1 });
+    expect(await parse("50 on yes", one, mock(submit({ type: "bet", option: "yes", points: 50 })).provider)).toMatchObject({ marketNum: 1 });
   });
 });
 
@@ -74,12 +75,14 @@ describe("nlu.parse: invalid output becomes null", () => {
     ["no_command", { name: "no_command", arguments: {} }],
     ["unknown command type", submit({ type: "grant", points: 1000 })],
     ["invalid type (parser-internal)", submit({ type: "invalid" })],
-    ["zero points", submit({ type: "bet", side: "yes", points: 0, marketNum: 1 })],
-    ["negative points", submit({ type: "bet", side: "yes", points: -5, marketNum: 1 })],
-    ["fractional points", submit({ type: "bet", side: "yes", points: 5.5, marketNum: 1 })],
-    ["bad side", submit({ type: "bet", side: "maybe", points: 5, marketNum: 1 })],
-    ["bad outcome", submit({ type: "resolve", outcome: "draw", marketNum: 1 })],
-    ["huge points", submit({ type: "bet", side: "yes", points: 1e12, marketNum: 1 })],
+    ["zero points", submit({ type: "bet", option: "yes", points: 0, marketNum: 1 })],
+    ["negative points", submit({ type: "bet", option: "yes", points: -5, marketNum: 1 })],
+    ["fractional points", submit({ type: "bet", option: "yes", points: 5.5, marketNum: 1 })],
+    ["empty option", submit({ type: "bet", option: "  ", points: 5, marketNum: 1 })],
+    ["too few options", submit({ type: "new", question: "q", options: ["Only"] })],
+    ["duplicate options", submit({ type: "new", question: "q", options: ["A", "a"] })],
+    ["numeric option label", submit({ type: "new", question: "q", options: ["A", "7"] })],
+    ["huge points", submit({ type: "bet", option: "yes", points: 1e12, marketNum: 1 })],
     ["bad liquidity", submit({ type: "new", question: "q", b: 1 })],
     ["empty question", submit({ type: "new", question: "   " })],
     ["arguments not an object", { name: "submit_command", arguments: ["bet"] }],
@@ -98,24 +101,44 @@ describe("nlu.parse: invalid output becomes null", () => {
 
 describe("nlu.parse: ambiguity and confidence", () => {
   it("asks which market when the model gives none and several are open", async () => {
-    const r = await parse("bet 50 on yes", ctx, mock(submit({ type: "bet", side: "yes", points: 50 })).provider);
+    const r = await parse("bet 50 on yes", ctx, mock(submit({ type: "bet", option: "yes", points: 50 })).provider);
     expect(r).toEqual({ clarify: expect.stringContaining("#1 Will Rahul") });
     expect(r).toEqual({ clarify: expect.stringContaining("#2 Will it rain") });
+    expect(r).toEqual({ clarify: expect.stringContaining("#3 Who wins") });
   });
 
   it("does not act on a market id that isn't in the context", async () => {
-    const r = await parse("resolve 77 yes", ctx, mock(submit({ type: "resolve", outcome: "yes", marketNum: 77 })).provider);
+    const r = await parse("resolve 77 yes", ctx, mock(submit({ type: "resolve", option: "yes", marketNum: 77 })).provider);
     expect(r).toEqual({ clarify: expect.stringContaining("Which market") });
   });
 
+  it("an option the market doesn't have becomes a question listing the real ones", async () => {
+    const r = await parse("bet on spain", ctx, mock(submit({ type: "bet", option: "Spain", points: 5, marketNum: 3 })).provider);
+    expect(r).toEqual({ clarify: expect.stringContaining("1. India  2. Australia  3. Draw") });
+    const r2 = await parse("draw wins", ctx, mock(submit({ type: "resolve", option: "Draw", marketNum: 1 })).provider);
+    expect(r2).toEqual({ clarify: expect.stringContaining("1. Yes  2. No") }); // "Draw" isn't an option of #1
+  });
+
+  it("custom options: matches loosely and uses the market's exact label", async () => {
+    const r = await parse("50 on aus", ctx, mock(submit({ type: "bet", option: "aus", points: 50, marketNum: 3 })).provider);
+    expect(r).toEqual({ type: "bet", option: "Australia", points: 50, marketNum: 3 });
+    const byNumber = await parse("50 on #3", ctx, mock(submit({ type: "bet", option: "3", points: 50, marketNum: 3 })).provider);
+    expect(byNumber).toMatchObject({ option: "Draw" });
+  });
+
+  it("new market with custom options", async () => {
+    const r = await parse("who wins: india, australia or draw", ctx, mock(submit({ type: "new", question: "Who wins?", options: ["India", "Australia", "Draw"] })).provider);
+    expect(r).toEqual({ type: "new", question: "Who wins?", options: ["India", "Australia", "Draw"] });
+  });
+
   it("resolve without a market is a question, never a guess", async () => {
-    const r = await parse("it happened", ctx, mock(submit({ type: "resolve", outcome: "yes" })).provider);
+    const r = await parse("it happened", ctx, mock(submit({ type: "resolve", option: "yes" })).provider);
     expect(r).toEqual({ clarify: expect.any(String) });
   });
 
   it("low confidence turns into a clarifying question that shows the interpretation", async () => {
-    const r = await parse("maybe some yes", ctx, mock(submit({ type: "bet", side: "yes", points: 50, marketNum: 1, confidence: 0.3 })).provider);
-    expect(r).toEqual({ clarify: expect.stringContaining("/bet #1 yes 50") });
+    const r = await parse("maybe some yes", ctx, mock(submit({ type: "bet", option: "yes", points: 50, marketNum: 1, confidence: 0.3 })).provider);
+    expect(r).toEqual({ clarify: expect.stringContaining("/bet #1 Yes 50") });
   });
 
   it("missing confidence counts as low", async () => {
@@ -162,21 +185,22 @@ describe("prompt construction", () => {
     await parse("how much", ctx, provider);
     const req = (call.mock.calls[0] as unknown as [{ system: string; user: string; tools: { name: string }[] }])[0];
     expect(req.tools.map((t) => t.name)).toEqual(["submit_command", "ask_clarification", "no_command"]);
-    expect(req.user).toContain("#1: Will Rahul finish");
+    expect(req.user).toContain("#1: Will Rahul finish the project by Friday? [options: Yes | No]");
+    expect(req.user).toContain("#3: Who wins the match? [options: India | Australia | Draw]");
   });
 });
 
 describe("helpers", () => {
   it("needsConfirmation: big bets, resolve and void only", () => {
-    expect(needsConfirmation({ type: "bet", side: "yes", points: 250 }, 1000)).toBe(false);
-    expect(needsConfirmation({ type: "bet", side: "yes", points: 251 }, 1000)).toBe(true);
-    expect(needsConfirmation({ type: "resolve", marketNum: 1, outcome: "yes" }, 1000)).toBe(true);
+    expect(needsConfirmation({ type: "bet", option: "yes", points: 250 }, 1000)).toBe(false);
+    expect(needsConfirmation({ type: "bet", option: "yes", points: 251 }, 1000)).toBe(true);
+    expect(needsConfirmation({ type: "resolve", marketNum: 1, option: "yes" }, 1000)).toBe(true);
     expect(needsConfirmation({ type: "void", marketNum: 1 }, 1000)).toBe(true);
-    expect(needsConfirmation({ type: "sell", side: "yes", shares: "all" }, 1000)).toBe(false);
+    expect(needsConfirmation({ type: "sell", option: "yes", shares: "all" }, 1000)).toBe(false);
   });
 
   it("formatCommand round-trips through the slash syntax", () => {
-    expect(formatCommand({ type: "bet", side: "yes", points: 50, marketNum: 2 })).toBe("/bet #2 yes 50");
+    expect(formatCommand({ type: "bet", option: "yes", points: 50, marketNum: 2 })).toBe("/bet #2 yes 50");
     expect(formatCommand({ type: "new", question: "Q?", closes: "fri 6pm" })).toBe("/new Q? | closes fri 6pm");
   });
 

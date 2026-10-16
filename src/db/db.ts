@@ -8,7 +8,7 @@ export type Db = Database.Database;
 const here = dirname(fileURLToPath(import.meta.url));
 
 // Ordered list of migrations. Index + 1 is the schema version stored in PRAGMA user_version.
-const migrations: string[] = [readFileSync(join(here, "schema.sql"), "utf8")];
+const migrations: string[] = ["schema.sql", "002_outcomes.sql"].map((f) => readFileSync(join(here, f), "utf8"));
 
 export function openDb(path = ":memory:"): Db {
   const db = new Database(path);

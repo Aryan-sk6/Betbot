@@ -89,6 +89,16 @@ One Discord server = one group economy. Server owners and members with Administr
 
 Run several at once with `--adapter telegram,discord,whatsapp`; they share one database but every chat keeps its own economy.
 
+**Using it in a group** (any platform):
+
+1. Create a market: `/new Will Rahul be late Friday? | closes fri 6pm`
+2. Everyone bets: `/bet yes 50` (add the market number when several are open: `/bet #2 yes 50`)
+3. Check on it: `/odds`, `/market 1`, `/balance`, `/leaderboard`
+4. Cash out early with `/sell yes all`
+5. When it's decided, the creator or a group admin settles it: `/resolve 1 yes` (or `/void 1` to refund everyone)
+
+The bot only runs while your process is running; see Docker below for leaving it on a server.
+
 **Docker:**
 
 ```bash
@@ -113,6 +123,36 @@ How it works:
 - It resolves references like "the rahul thing" only against the group's open markets. If more than one fits, or confidence is low, it asks a question listing the candidates instead of acting.
 - A bet over 25% of your balance, and any `/resolve` or `/void`, gets a **Confirm / Cancel** button first. Only the person who asked can press it, and it expires after 2 minutes.
 - Per-user and per-group rate limits apply.
+
+### Quick start with a free Gemini key
+
+1. Create a key at <https://aistudio.google.com/apikey> (free tier, rate limited; Google may use free-tier prompts to improve its products, so keep private info out of market questions).
+2. Find a model ID your key can use. In AI Studio pick a Flash model and click **Get code** to copy the exact `model` string, or list them:
+   ```bash
+   read -s KEY        # paste the key (hidden), press Enter
+   curl -s "https://generativelanguage.googleapis.com/v1beta/models" -H "x-goog-api-key: $KEY" | grep '"name"'
+   ```
+   Use the part after `models/` as `LLM_MODEL`. Model names change over time; the Flash and Flash-Lite families are the cheap, fast ones.
+3. Check the key and model without Telegram:
+   ```bash
+   LLM_PROVIDER=gemini LLM_API_KEY=$KEY LLM_MODEL=<model-id> npx tsx scripts/try-nlu.mts
+   ```
+   You should see commands like `{"type":"bet","side":"yes","points":50,"marketNum":1}`, a "Which market do you mean?" question for vague bets, and `null` for small talk.
+4. Start the bot with the same variables:
+   ```bash
+   LLM_PROVIDER=gemini LLM_API_KEY=$KEY LLM_MODEL=<model-id> \
+   TELEGRAM_BOT_TOKEN=<your-token> npm start -- --adapter telegram
+   ```
+   The startup line ends with `(natural language: gemini)` when it's on.
+5. In your group, create a market, then talk to the bot:
+   ```
+   /new Will Rahul finish the project by Friday? | closes fri 6pm
+   @yourbot put 50 on yes for the rahul thing
+   @yourbot what are the odds?
+   (reply to a bot message)  sell all my yes
+   ```
+
+Keep API keys and the Telegram token out of the repo and out of screenshots. If one leaks, revoke it (`/revoke` in @BotFather; delete the key in AI Studio) and make a new one.
 
 **BotFather privacy mode.** With privacy mode on (the default), Telegram delivers `/commands` and *replies to the bot's own messages*, so replying to the bot always works. Plain `@botname ...` mentions may not be delivered; if they get no response, either disable privacy (`/setprivacy` > Disable in @BotFather, then remove and re-add the bot to the group) or make the bot a group admin. Run with `LOG_LEVEL=debug` to see (metadata only) whether Telegram is delivering your messages.
 
@@ -146,9 +186,22 @@ LLM_PROVIDER=ollama LLM_MODEL=llama3.1 TELEGRAM_BOT_TOKEN=... npm start -- --ada
 
 `ollama` defaults the base URL to `http://localhost:11434/v1` and needs no key. If the bot runs in Docker and Ollama on the host, set `LLM_BASE_URL=http://host.docker.internal:11434/v1`. Local models need RAM: `llama3.1` (5 GB) is too heavy for an 8 GB machine, so try `llama3.2` (2 GB) and raise `LLM_TIMEOUT_MS` for the first, model-loading call. Small local models are less reliable at picking the right market; the confidence and clarification rules are what keep that safe.
 
+### Troubleshooting natural language mode
+
+| Symptom | Likely cause and fix |
+|---|---|
+| No reply at all to `@yourbot ...` and no log line | Telegram privacy mode isn't delivering mentions. Reply to a bot message instead, or disable privacy / make the bot admin (see above). Run with `LOG_LEVEL=debug` and look for `[telegram] update ...` lines. |
+| "I didn't catch that" | The model returned nothing usable, or the provider call failed. Check the terminal for a `[nlu] provider ... failed` line. |
+| `HTTP 404` | Wrong `LLM_MODEL`. The error text says which model wasn't found; list the models your key can use (see the quick start). |
+| `HTTP 401` / `403` | Bad or revoked API key. |
+| `HTTP 429` | Free-tier rate limit. Wait a minute, or lower `NLU_RATE_USER_PER_MIN`. |
+| "Which market do you mean?" | More than one open market fits. Name it, e.g. "the rain one", or use `/bet #2 yes 50`. |
+| `timeout` | Slow or local model. Raise `LLM_TIMEOUT_MS`. |
+| Nothing mentions `natural language` at startup | `LLM_PROVIDER` or `LLM_API_KEY` is missing in that command, so the mode is off. |
+
 The NLU code lives in `src/core/nlu.ts` and `src/core/llm/` and is platform-agnostic, so Discord and WhatsApp can use it later by calling `parse()` the same way the Telegram adapter does.
 
-### Configuration
+## Configuration
 
 | Env var | Default | |
 |---|---|---|

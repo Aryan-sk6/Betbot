@@ -107,14 +107,14 @@ On Telegram you can write plain English instead of strict commands, if you confi
 
 How it works:
 
-- It only triggers when the bot is **@mentioned** or when the message is a **reply to one of the bot's messages**. Everything else in the chat is never sent anywhere.
+- It only triggers when the bot is **@mentioned** or when the message is a **reply to one of the bot's messages** (see the privacy mode note below). Everything else in the chat is never sent anywhere.
 - Messages starting with `/` never call the LLM.
 - The model only picks a command and its arguments (via tool calling, validated with a zod schema that mirrors the command types). Anything invalid is dropped. Balances, payouts and permission checks are decided by the engine exactly as for a typed command, so a model that gets tricked still can't resolve a market it doesn't own or mint points.
 - It resolves references like "the rahul thing" only against the group's open markets. If more than one fits, or confidence is low, it asks a question listing the candidates instead of acting.
 - A bet over 25% of your balance, and any `/resolve` or `/void`, gets a **Confirm / Cancel** button first. Only the person who asked can press it, and it expires after 2 minutes.
 - Per-user and per-group rate limits apply.
 
-**BotFather privacy mode can stay on** (the default). Telegram still delivers `/commands`, @mentions of the bot, and replies to the bot, which is everything this mode needs. You do not have to disable privacy mode.
+**BotFather privacy mode.** With privacy mode on (the default), Telegram delivers `/commands` and *replies to the bot's own messages*, so replying to the bot always works. Plain `@botname ...` mentions may not be delivered; if they get no response, either disable privacy (`/setprivacy` > Disable in @BotFather, then remove and re-add the bot to the group) or make the bot a group admin. Run with `LOG_LEVEL=debug` to see (metadata only) whether Telegram is delivering your messages.
 
 | Env var | Default | |
 |---|---|---|

@@ -1,9 +1,10 @@
 // Telegram adapter: official Bot API over fetch with long polling. No SDK.
 // Create a bot with @BotFather and set TELEGRAM_BOT_TOKEN.
 //
-// BotFather privacy mode can stay ON (the default). Telegram still delivers /commands,
-// messages that @mention the bot, and replies to the bot's own messages, which is everything
-// the optional natural-language mode needs.
+// Natural-language mode and BotFather privacy mode: with privacy ON (the default) Telegram
+// delivers /commands and replies to the bot's own messages, but may not deliver plain
+// @mentions. To use @mentions, disable privacy (/setprivacy > Disable in @BotFather, then
+// remove and re-add the bot to the group) or make the bot a group admin.
 import { randomBytes } from "node:crypto";
 import { parseCommand, type Command } from "../core/commands.js";
 import { createEngine, type Actor, type Engine, type IncomingMessage } from "../core/engine.js";
@@ -190,6 +191,13 @@ export function createTelegramHandler(opts: {
 
   return {
     async handleUpdate(u: TgUpdate): Promise<void> {
+      if (process.env.LOG_LEVEL === "debug") {
+        // Metadata only, never message text.
+        const m = u.message;
+        console.debug(
+          `[telegram] update ${m ? `message chat=${m.chat.type} entities=[${(m.entities ?? []).map((e) => e.type)}] reply_to_bot=${m.reply_to_message?.from?.id === me.id}` : u.callback_query ? "callback_query" : "other"}`,
+        );
+      }
       try {
         if (u.message) await handleMessage(u.message);
         else if (u.callback_query) await handleCallback(u.callback_query);

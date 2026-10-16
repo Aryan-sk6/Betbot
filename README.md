@@ -63,7 +63,7 @@ Meta commands: `:admin <name>` toggles admin, `:advance 2h` moves the fake clock
 npm run whatsapp
 ```
 
-On first run, link the bot as a linked device. Either scan the printed QR (install `qrcode-terminal` to render it; otherwise the raw payload is printed) or set `GROUPBET_PAIR_PHONE=<country code + number>` to get a pairing code to enter under *Linked devices > Link with phone number*. Session files live in `./auth` and the database in `./data/groupbet.db`. If WhatsApp logs the bot out, delete `./auth` and pair again. Only group messages are handled.
+On first run, link the bot as a linked device. Either scan the QR printed in the terminal or set `GROUPBET_PAIR_PHONE=<country code + number>` to get a pairing code to enter under *Linked devices > Link with phone number*. Session files live in `./auth` and the database in `./data/groupbet.db`. If WhatsApp logs the bot out, delete `./auth` and pair again. Only group messages are handled.
 
 **Docker:**
 

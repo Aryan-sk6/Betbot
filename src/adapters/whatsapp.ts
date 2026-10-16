@@ -8,6 +8,7 @@ import makeWASocket, {
   type WAMessage,
   type WASocket,
 } from "@whiskeysockets/baileys";
+import qrcode from "qrcode-terminal";
 import { createEngine, type EngineOptions } from "../core/engine.js";
 
 const AUTH_DIR = process.env.GROUPBET_AUTH_DIR ?? "./auth";
@@ -85,16 +86,9 @@ const logger = {
   error: (obj: unknown, msg?: string) => console.error("[baileys]", msg ?? "", obj),
 };
 
-async function printQr(qr: string): Promise<void> {
+function printQr(qr: string): void {
   console.log("\nScan this QR code with WhatsApp > Linked devices (use a spare number):\n");
-  try {
-    // Optional: renders a scannable QR if `qrcode-terminal` is installed.
-    const spec = "qrcode-terminal";
-    const mod = await import(/* @vite-ignore */ spec);
-    (mod.default ?? mod).generate(qr, { small: true });
-  } catch {
-    console.log("(Install `qrcode-terminal` to render the QR here.) Raw QR payload:\n" + qr + "\n");
-  }
+  qrcode.generate(qr, { small: true });
 }
 
 export async function runWhatsApp(base: Omit<EngineOptions, "isAdmin" | "now">): Promise<void> {
@@ -117,7 +111,7 @@ export async function runWhatsApp(base: Omit<EngineOptions, "isAdmin" | "now">):
           s.requestPairingCode(phone)
             .then((code) => console.log(`\nPairing code: ${code}\nEnter it on the phone: Linked devices > Link with phone number.\n`))
             .catch((err) => console.error("[whatsapp] pairing code request failed:", err));
-        } else void printQr(qr);
+        } else printQr(qr);
       }
       if (connection === "open") console.log("[whatsapp] connected");
       if (connection === "close") {

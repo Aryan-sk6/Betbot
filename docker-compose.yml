@@ -1,0 +1,11 @@
+services:
+  groupbet:
+    build: .
+    restart: unless-stopped
+    environment:
+      GROUPBET_ADAPTER: whatsapp
+      TZ: Asia/Kolkata
+      # GROUPBET_PAIR_PHONE: "919876543210"   # optional: pairing code instead of QR
+    volumes:
+      - ./auth:/app/auth
+      - ./data:/app/data
